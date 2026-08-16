@@ -134,6 +134,27 @@ class _Decoder:
             out.append(self.tok.token_str(nxt))
         return "".join(out)
 
+    def gen_templated(self, template: str) -> str:
+        """Fill a fixed-shape value: '#' positions are model-chosen digits, all
+        other chars are force-fed. Used for datetime args, whose format is a
+        constant the model should never have to spell (only the digits vary)."""
+        out = []
+        for ch in template:
+            if ch != "#":
+                self.feed_str(ch)
+                out.append(ch)
+                continue
+            logits = self.next_logits()
+            masked = torch.full_like(logits, -float("inf"))
+            for d in "0123456789":
+                tid = self.tok.vocab.get(d)
+                if tid is not None:
+                    masked[tid] = logits[tid]
+            nxt = int(masked.argmax().item())
+            self.feed_id(nxt)
+            out.append(self.tok.token_str(nxt))
+        return "".join(out)
+
     _NUM_CHARS = set("0123456789.-")
 
     def gen_number_value(self) -> str:
@@ -168,6 +189,20 @@ class _Decoder:
             self.feed_str("0")
             return "0"
         return out
+
+
+def _value_template(key: str, spec: dict[str, Any]) -> str | None:
+    """Reserved for values whose format is a verifiable constant.
+
+    Deliberately disabled: Mobile Actions' own schema advertises
+    `YYYY-MM-DDTHH:MM:SS` while its gold values are `2025-05-13 13:30:00`
+    (space, not `T`), so schema text is NOT a trustworthy source for the shape,
+    and our synth uses a third format. Forcing a template here would corrupt
+    every datetime row on one dataset or the other. The convention is learned
+    from data instead (MA-train is in the mix). gen_templated stays available
+    for cases where the format is confirmed by gold, not by prose.
+    """
+    return None
 
 
 def _sorted_props(tool: dict[str, Any]) -> tuple[list[str], set[str], dict[str, Any]]:
@@ -270,7 +305,8 @@ def constrained_decode(
                     args[key] = int(args[key])
             else:
                 dec.feed_str('"')
-                val = dec.gen_string_value()
+                shape = _value_template(key, spec)
+                val = dec.gen_templated(shape) if shape else dec.gen_string_value()
                 dec.feed_str('"')
                 args[key] = val
         dec.feed_str("}}")
