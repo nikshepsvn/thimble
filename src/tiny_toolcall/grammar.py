@@ -29,7 +29,7 @@ from tiny_toolcall.retrieve import retrieve
 from tiny_toolcall.tokenizer import BOS, BPETokenizer
 
 MAX_CALLS = 4
-MAX_VALUE_TOKENS = 24
+MAX_VALUE_TOKENS = 96  # email bodies and addresses run long; truncation was costing exact-match
 
 
 class _Decoder:
