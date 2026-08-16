@@ -65,7 +65,7 @@ def score_rows(rows: list[dict[str, Any]]) -> dict[str, float]:
     n = len(rows)
     if n == 0:
         return {}
-    exact = name = formed = 0
+    exact = name = formed = nonempty = 0
     n1 = e1 = n2 = e2 = n0 = e0 = 0
     for r in rows:
         gold = canon_calls(r["gold"])
@@ -74,6 +74,7 @@ def score_rows(rows: list[dict[str, Any]]) -> dict[str, float]:
             pred = canon_calls(pred)
         well = pred is not None
         formed += int(well)
+        nonempty += int(bool(pred))
         hit = exact_match(pred, gold)
         exact += int(hit)
         name += int(name_match(pred, gold))
@@ -92,6 +93,7 @@ def score_rows(rows: list[dict[str, Any]]) -> dict[str, float]:
         "accuracy": exact / n,
         "name_acc": name / n,
         "well_formed": formed / n,
+        "non_empty": nonempty / n,
         "one_call": (e1 / n1) if n1 else 0.0,
         "two_plus": (e2 / n2) if n2 else 0.0,
         "refuse": (e0 / n0) if n0 else 0.0,

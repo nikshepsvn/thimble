@@ -115,6 +115,34 @@ def cmd_eval(args) -> None:
             print(_fmt(score_predictor(rows, pred)))
 
 
+def cmd_official(args) -> None:
+    import torch
+
+    from tiny_toolcall.eval import make_model_predictor, predict_s2, score_predictor
+    from tiny_toolcall.model import Config, ToolTransformer
+    from tiny_toolcall.official import mobile_actions_rows
+    from tiny_toolcall.tokenizer import BPETokenizer
+    from tiny_toolcall.train import pick_device
+
+    rows = mobile_actions_rows(DATA / "eval" / "mobile_actions_eval.jsonl")
+    if args.n:
+        rows = rows[: args.n]
+    print(f"Mobile Actions eval, n={len(rows)}  (Needle 2: acc 63.7, name 98.3, 1-call 71.3, 2-call 48.4)")
+    print("S2 baseline:")
+    print(_fmt(score_predictor(rows, predict_s2)))
+    if args.ckpt:
+        tok = BPETokenizer.load(TOK_PATH)
+        blob = torch.load(CKPT / f"{args.ckpt}.pt", map_location="cpu", weights_only=False)
+        model = ToolTransformer(Config(**blob["cfg"]))
+        model.load_state_dict(blob["model"])
+        device = pick_device()
+        model.to(device).eval()
+        for heads in (True, False):
+            pred = make_model_predictor(model, tok, device, use_name_head=heads)
+            print("model " + ("heads-on:" if heads else "heads-off:"))
+            print(_fmt(score_predictor(rows, pred)))
+
+
 def cmd_teacher(args) -> None:
     import asyncio
 
@@ -141,7 +169,7 @@ def _read_rows(path: Path) -> list[dict]:
 
 
 def _fmt(s: dict) -> str:
-    keys = ["accuracy", "name_acc", "well_formed", "one_call", "two_plus", "refuse"]
+    keys = ["accuracy", "name_acc", "well_formed", "non_empty", "one_call", "two_plus", "refuse"]
     return "  " + "  ".join(f"{k}={s.get(k, 0):.3f}" for k in keys)
 
 
@@ -188,6 +216,11 @@ def main() -> None:
     p.add_argument("--concurrency", type=int, default=24)
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(fn=cmd_teacher)
+
+    p = sub.add_parser("official")
+    p.add_argument("--n", type=int, default=0)
+    p.add_argument("--ckpt", default="")
+    p.set_defaults(fn=cmd_official)
 
     args = ap.parse_args()
     args.fn(args)
