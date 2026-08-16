@@ -91,7 +91,11 @@ def step_loss(
     weights: torch.Tensor,
     name_loss_w: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
-    logits, hidden = model(ids)
+    if ids.device.type == "cuda":
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            logits, hidden = model(ids)
+    else:
+        logits, hidden = model(ids)
     # next-token prediction: logits[t] predicts ids[t+1], weighted by tag[t+1]
     tgt = ids[:, 1:]
     w = weights[tags[:, 1:].long()]
@@ -140,6 +144,8 @@ def train(
     batch = max(1, int(tr.get("global_tokens", 65536)) // seq_len)
     if device.type != "cuda":
         batch = min(batch, 16)
+    else:
+        batch = min(batch, 64)  # 24GB with bf16 activations; raise on bigger cards
 
     muon_p, adamw_p = split_params(model)
     opt_m = Muon(muon_p, lr=float(tr.get("lr_muon", 0.02)), weight_decay=float(tr.get("wd", 0.01)))

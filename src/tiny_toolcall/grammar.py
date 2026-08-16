@@ -113,16 +113,17 @@ class _Decoder:
         return best
 
     def gen_string_value(self, closing: str = '"') -> str:
-        """Free-generate a string value; structural singletons mean the closing
-        quote is always its own token, so we stop exactly there."""
+        """Free-generate a string value until the closing quote token. String
+        values legitimately contain structural chars (datetimes have ':'), so
+        only specials are banned — the quote singleton is the exact terminator."""
         close_id = self.tok.vocab[closing]
         out: list[str] = []
         for _ in range(MAX_VALUE_TOKENS):
             logits = self.next_logits()
-            # ban structural tokens other than the closer inside a string value
             masked = logits.clone()
-            for ch in "{}[],:":
-                tid = self.tok.vocab.get(ch)
+            masked[:4] = -float("inf")  # pad/bos/eos/unk
+            for sp in ("<tools>", "</tools>", "<query>", "</query>", "<call>", "</call>"):
+                tid = self.tok.vocab.get(sp)
                 if tid is not None:
                     masked[tid] = -float("inf")
             nxt = int(masked.argmax().item())
@@ -132,22 +133,40 @@ class _Decoder:
             out.append(self.tok.token_str(nxt))
         return "".join(out)
 
+    _NUM_CHARS = set("0123456789.-")
+
     def gen_number_value(self) -> str:
-        """Numbers are single words under our pretokenizer ("-" and "." are not
-        structural, digits merge). Generate one token, validate, fall back to 0."""
-        logits = self.next_logits()
-        order = torch.argsort(logits, descending=True)
-        for cand in order[:64].tolist():
-            s = self.tok.token_str(cand)
-            try:
-                json.loads(s)
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if isinstance(json.loads(s), (int, float)):
-                self.feed_id(cand)
-                return s
-        self.feed_str("0")
-        return "0"
+        """Generate number tokens until the next token would leave [0-9.-];
+        numbers may span several BPE tokens (e.g. '1200' + '.0')."""
+        out = ""
+        for _ in range(6):
+            logits = self.next_logits()
+            masked = logits.clone()
+            order = torch.argsort(masked, descending=True)
+            nxt = None
+            for cand in order[:96].tolist():
+                s = self.tok.token_str(cand)
+                if s and all(c in self._NUM_CHARS for c in s):
+                    candidate = out + s
+                    try:
+                        float(candidate)
+                    except ValueError:
+                        continue
+                    nxt = (cand, s)
+                    break
+            if nxt is None:
+                break
+            # stop if the model prefers a structural continuation over more digits
+            struct_ids = [self.tok.vocab.get(c) for c in ',}']
+            best_struct = max((logits[i].item() for i in struct_ids if i is not None), default=-float("inf"))
+            if out and best_struct > logits[nxt[0]].item():
+                break
+            self.feed_id(nxt[0])
+            out += nxt[1]
+        if not out:
+            self.feed_str("0")
+            return "0"
+        return out
 
 
 def _sorted_props(tool: dict[str, Any]) -> tuple[list[str], set[str], dict[str, Any]]:
@@ -164,7 +183,7 @@ def constrained_decode(
     query: str,
     tools: list[dict[str, Any]],
     device: torch.device,
-    k: int = 5,
+    k: int = 0,
     use_name_head: bool = True,
     name_spans: dict[str, tuple[int, int]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -174,6 +193,10 @@ def constrained_decode(
     needed for the name head; if absent (or use_name_head=False) the LM picks
     names by teacher-forced logprob (the heads-off ablation).
     """
+    # retrieval narrows only genuinely large catalogs; small ones stay whole so
+    # retrieval recall never caps name accuracy below what the head can do
+    if k <= 0:
+        k = len(tools) if len(tools) <= 8 else 5
     dec = _Decoder(model, tok, device)
     dec.feed_id(BOS)  # sequences start with BOS in training; match it here
     dec.feed_str(prompt)
@@ -211,14 +234,18 @@ def constrained_decode(
         keys, required, props = _sorted_props(tool)
         args: dict[str, Any] = {}
         first = True
-        for key in keys:
+        for ki, key in enumerate(keys):
             spec = props.get(key, {})
             sep = "" if first else ","
             if key not in required:
-                # include this optional? first chars differ: , or " vs }
+                # include this optional? the skip-path continuation is the NEXT
+                # key's opener (which also starts with `"`) or `}` — so the
+                # decision must be scored on content, not the first token
                 opener = f'{sep}"{key}":'
-                pick = dec.choose_first([opener, "}"])
-                if pick == "}":
+                nxt_key = keys[ki + 1] if ki + 1 < len(keys) else None
+                skip = f'{sep}"{nxt_key}":' if nxt_key else "}"
+                pick = dec.choose_str([opener, skip])
+                if pick != opener:
                     continue
                 dec.feed_str(opener)
             else:

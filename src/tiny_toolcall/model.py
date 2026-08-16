@@ -39,8 +39,10 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(d))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        rms = x.float().pow(2).mean(-1, keepdim=True).add(self.eps).rsqrt()
-        return (x.float() * rms).type_as(x) * self.weight
+        # fp32 only for the reduction; the (b,t,1) rsqrt is tiny, so backward
+        # retains x in its native dtype instead of a full fp32 copy
+        rms = x.float().pow(2).mean(-1, keepdim=True).add(self.eps).rsqrt().to(x.dtype)
+        return x * rms * self.weight
 
 
 def rotate(x: torch.Tensor) -> torch.Tensor:
