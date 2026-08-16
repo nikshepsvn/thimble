@@ -15,7 +15,7 @@ import torch
 
 from tiny_toolcall.eval import make_model_predictor, predict_s2, score_predictor
 from tiny_toolcall.model import Config, ToolTransformer
-from tiny_toolcall.official import mobile_actions_rows
+from tiny_toolcall.official import mobile_actions_rows, seal_tools_rows
 from tiny_toolcall.tokenizer import BPETokenizer
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +52,10 @@ def main() -> None:
     if ma.exists():
         rows = mobile_actions_rows(ma)
         suites.append(("mobile-actions", rows[: args.n_ma] if args.n_ma else rows))
+    for tag in ("in", "out"):
+        st = ROOT / "data" / "eval" / f"seal_tools_{tag}_domain.json"
+        if st.exists():
+            suites.append((f"seal-tools-{tag}", seal_tools_rows(st)))
 
     if args.suite:
         suites = [(n, r) for n, r in suites if n == args.suite]

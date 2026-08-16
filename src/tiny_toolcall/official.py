@@ -36,6 +36,57 @@ def _clean_args(args: dict[str, Any] | None) -> dict[str, Any]:
     return {k: v for k, v in (args or {}).items() if v is not None}
 
 
+_PY_TYPE = {"str": "string", "int": "integer", "float": "number", "bool": "boolean",
+            "list": "array", "dict": "object"}
+
+
+def seal_tools_rows(path: Path) -> list[dict[str, Any]]:
+    """Seal-Tools: prompt embeds a python-literal api_list plus task_instruction;
+    the gold answer is a python-literal list of {api, parameters, responses}.
+
+    Chained calls reference earlier outputs as 'API_call_N' placeholders; those
+    are kept verbatim, matching the benchmark's own strict-match convention.
+    """
+    import ast
+    import re
+
+    rows: list[dict[str, Any]] = []
+    for item in json.loads(path.read_text()):
+        conv = {c["from"]: c["value"] for c in item.get("conversations", [])}
+        human, gold_txt = conv.get("human", ""), conv.get("gpt", "")
+        # both markers also appear in the instruction header; anchor on the
+        # assignment forms and take the trailing task_instruction = "..."
+        m = re.search(r"api_list\s*=\s*(\[.*\])\s*\ntask_instruction\s*=", human, re.DOTALL)
+        q = re.search(r'task_instruction\s*=\s*"(.*?)"\s*\n\s*Output\s*:', human, re.DOTALL)
+        if not m or not q:
+            continue
+        try:
+            api_list = ast.literal_eval(m.group(1))
+            gold = ast.literal_eval(gold_txt.strip())
+        except (ValueError, SyntaxError):
+            continue
+        tools = []
+        for api in api_list:
+            props = {}
+            for pname, spec in (api.get("parameters") or {}).items():
+                spec = spec or {}
+                props[pname] = {
+                    "type": _PY_TYPE.get(str(spec.get("type", "str")), "string"),
+                    "description": spec.get("description", ""),
+                }
+            tools.append({
+                "name": api.get("api_name", ""),
+                "description": api.get("api_description", ""),
+                "parameters": {"type": "object", "properties": props,
+                               "required": [r for r in (api.get("required") or []) if r in props]},
+            })
+        answers = [{"name": c.get("api", ""), "arguments": dict(c.get("parameters") or {})}
+                   for c in (gold if isinstance(gold, list) else [])]
+        rows.append({"query": q.group(1), "tools": tools, "answers": answers,
+                     "kind": "official", "split": path.stem})
+    return rows
+
+
 def mobile_actions_rows(path: Path) -> list[dict[str, Any]]:
     out = []
     for line in path.read_text().splitlines():

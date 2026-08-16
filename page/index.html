@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thimble</title>
+<style>
+:root{
+  --ground:#FCFCFA;
+  --raise:#F4F4F1;
+  --ink:#14171C;
+  --muted:#5C636E;
+  --faint:#8A8F98;
+  --rule:#E3E4E0;
+  --accent:#0F7A8A;
+  --accent-soft:#E2F0F2;
+  --forced:#9A9FA8;
+  --good:#2F6F4F;
+  --warn:#9A5B2E;
+  --serif:Charter,"Bitstream Charter","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#101317;
+    --raise:#171B21;
+    --ink:#E7EAEC;
+    --muted:#9AA2AD;
+    --faint:#6E7681;
+    --rule:#252A31;
+    --accent:#4FB8C8;
+    --accent-soft:#123036;
+    --forced:#6E7681;
+    --good:#6FBF8F;
+    --warn:#D79A62;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#101317;
+  --raise:#171B21;
+  --ink:#E7EAEC;
+  --muted:#9AA2AD;
+  --faint:#6E7681;
+  --rule:#252A31;
+  --accent:#4FB8C8;
+  --accent-soft:#123036;
+  --forced:#6E7681;
+  --good:#6FBF8F;
+  --warn:#D79A62;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--ground);color:var(--ink);
+  font-family:var(--serif);font-size:18px;line-height:1.62;
+  font-synthesis-weight:none;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:0 28px}
+.col{max-width:640px;margin:0 auto}
+p,ul,ol{margin:0 0 1.15em}
+a{color:var(--accent);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+a:hover{border-bottom-color:var(--accent)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+strong{font-weight:600}
+code{font-family:var(--mono);font-size:.86em;background:var(--raise);padding:.1em .34em;border-radius:3px;
+  border:1px solid var(--rule)}
+
+/* ---------- masthead ---------- */
+header.top{border-bottom:1px solid var(--rule);padding:22px 0 20px;margin-bottom:64px}
+.topbar{display:flex;align-items:baseline;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.wordmark{font-family:var(--mono);font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink)}
+.wordmark b{color:var(--accent);font-weight:500}
+.topmeta{font-family:var(--mono);font-size:11.5px;letter-spacing:.09em;color:var(--faint);text-transform:uppercase}
+button.theme{font-family:var(--mono);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;
+  background:none;border:1px solid var(--rule);color:var(--muted);padding:5px 10px;border-radius:3px;cursor:pointer}
+button.theme:hover{color:var(--ink);border-color:var(--faint)}
+
+/* ---------- hero ---------- */
+.hero{margin-bottom:72px}
+h1{font-size:clamp(34px,5.4vw,54px);line-height:1.08;letter-spacing:-.02em;margin:0 0 22px;
+  font-weight:600;text-wrap:balance;max-width:16ch}
+.standfirst{font-size:20px;line-height:1.55;color:var(--muted);max-width:56ch;margin:0 0 34px}
+.headline-figure{display:flex;gap:0;flex-wrap:wrap;border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);margin-top:8px}
+.hf{padding:20px 26px 20px 0;margin-right:26px;border-right:1px solid var(--rule);flex:0 0 auto}
+.hf:last-child{border-right:none}
+.hf .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--faint);
+  display:block;margin-bottom:7px}
+.hf .v{font-family:var(--mono);font-size:30px;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums;
+  line-height:1;display:block}
+.hf .v.win{color:var(--accent)}
+.hf .sub{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:6px;display:block}
+
+/* ---------- sections ---------- */
+section{margin-bottom:76px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);
+  margin:0 0 14px}
+h2{font-size:clamp(24px,3vw,30px);line-height:1.2;letter-spacing:-.015em;margin:0 0 20px;font-weight:600;
+  text-wrap:balance;max-width:22ch}
+h3{font-size:19px;margin:34px 0 12px;font-weight:600;letter-spacing:-.005em}
+.lede{font-size:19px;color:var(--muted)}
+
+/* ---------- instrument blocks ---------- */
+.instrument{background:var(--raise);border:1px solid var(--rule);border-radius:5px;padding:26px;margin:34px 0}
+.instrument.bleed{max-width:none}
+.icap{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
+  margin:16px 0 0;line-height:1.5}
+.icap b{color:var(--muted);font-weight:500}
+.scroll{overflow-x:auto}
+
+/* ---------- table ---------- */
+table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:13.5px;
+  font-variant-numeric:tabular-nums}
+th{text-align:right;font-weight:500;color:var(--faint);font-size:10.5px;letter-spacing:.09em;
+  text-transform:uppercase;padding:0 0 10px 18px;border-bottom:1px solid var(--rule);white-space:nowrap}
+th:first-child,td:first-child{text-align:left;padding-left:0}
+td{padding:11px 0 11px 18px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap}
+tr.ours td{color:var(--ink);font-weight:600}
+tr.ours td:first-child{color:var(--accent)}
+tr:last-child td{border-bottom:none}
+td.model{font-family:var(--serif);font-size:15px;font-weight:400}
+tr.ours td.model{font-weight:600}
+.dim{color:var(--faint)}
+
+/* ---------- pull ---------- */
+.pull{border-left:2px solid var(--accent);padding:2px 0 2px 22px;margin:32px 0;font-size:19px;
+  color:var(--ink);max-width:52ch}
+
+/* ---------- legend ---------- */
+.legend{display:flex;gap:22px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;
+  letter-spacing:.06em;color:var(--muted);margin-top:4px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:7px;vertical-align:-1px}
+
+/* ---------- notes / caveats ---------- */
+.caveat{border:1px solid var(--rule);border-left:2px solid var(--warn);border-radius:4px;
+  padding:18px 22px;margin:20px 0;background:var(--raise)}
+.caveat h4{font-family:var(--mono);font-size:11px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--warn);margin:0 0 8px;font-weight:500}
+.caveat p{margin:0;font-size:16.5px;color:var(--muted)}
+
+/* ---------- bug list ---------- */
+.bugs{list-style:none;padding:0;margin:24px 0 0;counter-reset:b}
+.bugs li{border-top:1px solid var(--rule);padding:16px 0 16px 46px;position:relative;font-size:16.5px;
+  color:var(--muted)}
+.bugs li::before{counter-increment:b;content:counter(b,decimal-leading-zero);position:absolute;left:0;top:16px;
+  font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.06em}
+.bugs li b{color:var(--ink);font-weight:600}
+
+footer{border-top:1px solid var(--rule);padding:30px 0 60px;font-family:var(--mono);font-size:11.5px;
+  letter-spacing:.06em;color:var(--faint);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+svg{display:block;max-width:100%;height:auto}
+.tspan-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (max-width:640px){
+  body{font-size:17px}
+  .hf{padding-right:18px;margin-right:18px}
+  .hf .v{font-size:24px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap topbar">
+    <span class="wordmark"><b>Thimble</b> · 44M tool-caller</span>
+    <span class="topmeta">Technical report · 16 Aug 2026</span>
+    <button class="theme" id="themeBtn" type="button">Theme</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+<div class="col hero">
+  <h1>A 45M tool-caller that cannot emit invalid JSON</h1>
+  <p class="standfirst">Five days ago Cactus shipped Needle 2 — 45M parameters, 14MB, running on a
+  microcontroller, scoring 63.7% on Google's Mobile Actions. We spent one working day and $27
+  building a model in the same size class. It scores 80.1%. This is why the gap exists, and it
+  is neither scale nor a better mixer.</p>
+
+  <div class="headline-figure">
+    <div class="hf"><span class="k">Mobile Actions</span><span class="v win">80.1</span>
+      <span class="sub">Needle 2 · 63.7</span></div>
+    <div class="hf"><span class="k">Two-call rows</span><span class="v win">66.0</span>
+      <span class="sub">Needle 2 · 48.4</span></div>
+    <div class="hf"><span class="k">Well-formed</span><span class="v">100</span>
+      <span class="sub">structural, not trained</span></div>
+    <div class="hf"><span class="k">Total cost</span><span class="v">$27</span>
+      <span class="sub">1 GPU-hour + teacher data</span></div>
+  </div>
+</div>
+
+<!-- ============ 1. THESIS ============ -->
+<section class="col">
+  <p class="eyebrow">The bet</p>
+  <h2>Tool calling is five decisions, not a generation problem</h2>
+  <p class="lede">Most tool-calling models are language models that write JSON. Ours is a language
+  model that makes five decisions, with the JSON assembled around it by a compiler.</p>
+
+  <p>Look at what a tool call actually requires. Given a query and a catalog of typed functions,
+  something has to decide: does any tool apply, which one, which optional arguments the query
+  licenses, what values go in them, and whether another call is needed. Every other token in the
+  output — the braces, the quotes, the commas, and critically <em>every argument key</em> — is
+  determined by the schema before the model runs.</p>
+
+  <p>A model that generates JSON as text spends capacity learning that <code>{</code> follows
+  <code>[</code>. At 45M parameters you cannot afford that. So we don't.</p>
+</section>
+
+<!-- ============ DIAGRAM 1 ============ -->
+<div class="instrument">
+  <div class="scroll">
+  <svg viewBox="0 0 940 300" role="img" aria-label="A decoded tool call showing which tokens the grammar forces and the five points where the model decides">
+    <defs>
+      <marker id="tick" markerWidth="6" markerHeight="6" refX="3" refY="3">
+        <circle cx="3" cy="3" r="2" fill="currentColor"/>
+      </marker>
+    </defs>
+    <!-- token strip -->
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">
+      <!-- forced tokens -->
+      <g fill="var(--forced)">
+        <text x="20" y="118">[</text>
+        <text x="52" y="118">{</text>
+        <text x="70" y="118">"name":</text>
+        <text x="330" y="118">,</text>
+        <text x="345" y="118">"arguments":</text>
+        <text x="470" y="118">{</text>
+        <text x="484" y="118">"room":</text>
+        <text x="640" y="118">,</text>
+        <text x="655" y="118">"brightness":</text>
+        <text x="800" y="118">}</text>
+        <text x="812" y="118">}</text>
+      </g>
+      <!-- model-decided tokens -->
+      <g fill="var(--accent)" font-weight="600">
+        <text x="152" y="118">"set_lights"</text>
+        <text x="558" y="118">"kitchen"</text>
+        <text x="775" y="118">30</text>
+        <text x="838" y="118">]</text>
+      </g>
+    </g>
+
+    <!-- underlines under decisions -->
+    <g stroke="var(--accent)" stroke-width="1.5">
+      <line x1="152" y1="128" x2="248" y2="128"/>
+      <line x1="558" y1="128" x2="632" y2="128"/>
+      <line x1="775" y1="128" x2="795" y2="128"/>
+      <line x1="838" y1="128" x2="848" y2="128"/>
+      <line x1="20" y1="128" x2="30" y2="128"/>
+      <line x1="484" y1="128" x2="540" y2="128" stroke-dasharray="3 3"/>
+    </g>
+
+    <!-- callouts -->
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" fill="var(--muted)"
+       letter-spacing="0.06em">
+      <g stroke="var(--rule)" stroke-width="1">
+        <path d="M25 128 V 168 H 60" fill="none"/>
+        <path d="M200 128 V 190 H 240" fill="none"/>
+        <path d="M512 128 V 216 H 560" fill="none"/>
+        <path d="M595 128 V 244 H 640" fill="none"/>
+        <path d="M843 128 V 268 H 880" fill="none"/>
+      </g>
+      <text x="66" y="172">1 · refuse or call  —  <tspan fill="var(--faint)">] vs {</tspan></text>
+      <text x="246" y="194">2 · which tool  —  <tspan fill="var(--faint)">name head + LM over retrieved set</tspan></text>
+      <text x="566" y="220">3 · include this optional key?</text>
+      <text x="646" y="248">4 · value  —  <tspan fill="var(--faint)">copied from the query span</tspan></text>
+      <text x="700" y="272" text-anchor="end">5 · stop or continue  —  <tspan fill="var(--faint)">, vs ]</tspan></text>
+      <path d="M710 268 H 878" stroke="var(--rule)" fill="none"/>
+    </g>
+
+    <!-- top labels -->
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10.5" letter-spacing="0.11em">
+      <text x="20" y="40" fill="var(--faint)">INPUT</text>
+      <text x="20" y="62" font-size="13" fill="var(--muted)" font-family="Charter,Georgia,serif"
+        letter-spacing="0">“dim the kitchen to 30”</text>
+      <text x="700" y="40" fill="var(--faint)">OUTPUT · 14 TOKENS, 5 CHOSEN</text>
+    </g>
+  </svg>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--forced)"></i>forced by the grammar — the model never sees a choice</span>
+    <span><i style="background:var(--accent)"></i>the model decides</span>
+  </div>
+  <p class="icap"><b>Fig. 1</b> — Three failure modes become unreachable rather than unlikely:
+  malformed JSON, invented argument names, and calls to tools that don't exist. Not trained away —
+  inexpressible.</p>
+</div>
+
+<!-- ============ 2. WHERE NEEDLE LOSES ============ -->
+<section class="col">
+  <p class="eyebrow">The diagnosis</p>
+  <h2>Where Needle actually loses</h2>
+  <p>Needle 2's own table is the interesting part of their release: <strong>98.3% name accuracy,
+  63.7% overall, 48.4% on two-call rows.</strong> They almost never pick the wrong tool. They lose
+  on argument values, and on second calls that never get made.</p>
+
+  <p class="pull">The second number is a mechanism, not a mystery.</p>
+
+  <p>Their pipeline retrieves the top-5 tools once, then generates the call array as tokens. If the
+  second call needs a tool outside that initial set, it was never a legal option — the model cannot
+  recover, no matter how well it understood the query. The fix appears in a paper they don't cite:
+  <a href="https://arxiv.org/abs/2512.17052">DTDR</a> conditions retrieval on the query <em>plus
+  the calls already emitted</em>. We re-run retrieval between array elements and swap the grammar's
+  legal name set mid-generation.</p>
+</section>
+
+<!-- ============ DIAGRAM 2 ============ -->
+<div class="instrument">
+  <div class="scroll">
+  <svg viewBox="0 0 900 260" role="img" aria-label="Static top-5 retrieval loses the second tool; re-retrieval after each emitted call recovers it">
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11" letter-spacing="0.08em">
+      <text x="0" y="16" fill="var(--faint)">STATIC TOP-5 · RETRIEVED ONCE</text>
+      <text x="0" y="150" fill="var(--accent)">RE-RETRIEVED AFTER EACH EMITTED CALL</text>
+    </g>
+    <g font-family="Charter,Georgia,serif" font-size="13" fill="var(--muted)">
+      <text x="0" y="40">query: “text @maya I'm running late, and turn the porch light off”</text>
+    </g>
+
+    <!-- static row -->
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11.5">
+      <g>
+        <rect x="0" y="56" width="132" height="26" rx="3" fill="none" stroke="var(--accent)"/>
+        <text x="12" y="73" fill="var(--accent)">send_message ✓</text>
+        <rect x="140" y="56" width="112" height="26" rx="3" fill="none" stroke="var(--rule)"/>
+        <text x="152" y="73" fill="var(--faint)">send_email</text>
+        <rect x="260" y="56" width="112" height="26" rx="3" fill="none" stroke="var(--rule)"/>
+        <text x="272" y="73" fill="var(--faint)">create_note</text>
+        <rect x="380" y="56" width="104" height="26" rx="3" fill="none" stroke="var(--rule)"/>
+        <text x="392" y="73" fill="var(--faint)">set_timer</text>
+        <rect x="492" y="56" width="116" height="26" rx="3" fill="none" stroke="var(--rule)"/>
+        <text x="504" y="73" fill="var(--faint)">create_event</text>
+      </g>
+      <g opacity="0.55">
+        <rect x="640" y="56" width="120" height="26" rx="3" fill="none" stroke="var(--rule)"
+          stroke-dasharray="4 3"/>
+        <text x="652" y="73" fill="var(--faint)">set_lights</text>
+      </g>
+      <text x="770" y="73" font-size="10.5" fill="var(--warn)">not in the set</text>
+      <path d="M636 69 H 616" stroke="var(--rule)" fill="none"/>
+      <text x="0" y="104" font-size="11" fill="var(--warn)">call 2 has no legal name to emit → the array closes early</text>
+    </g>
+
+    <!-- divider -->
+    <line x1="0" y1="124" x2="900" y2="124" stroke="var(--rule)"/>
+
+    <!-- dynamic row -->
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11.5">
+      <rect x="0" y="170" width="132" height="26" rx="3" fill="none" stroke="var(--forced)"/>
+      <text x="12" y="187" fill="var(--faint)">send_message ·</text>
+      <text x="140" y="187" fill="var(--muted)" font-size="10.5">emitted → conditions the next retrieval</text>
+
+      <g>
+        <rect x="0" y="206" width="120" height="26" rx="3" fill="none" stroke="var(--accent)"/>
+        <text x="12" y="223" fill="var(--accent)">set_lights ✓</text>
+        <rect x="128" y="206" width="112" height="26" rx="3" fill="none" stroke="var(--rule)"/>
+        <text x="140" y="223" fill="var(--faint)">lock_door</text>
+        <rect x="248" y="206" width="128" height="26" rx="3" fill="none" stroke="var(--rule)"/>
+        <text x="260" y="223" fill="var(--faint)">set_thermostat</text>
+      </g>
+      <text x="396" y="223" font-size="10.5" fill="var(--good)">grammar's legal name set swapped mid-generation</text>
+    </g>
+  </svg>
+  </div>
+  <p class="icap"><b>Fig. 2</b> — The two-call gap, drawn. Needle scores 48.4 here; we score
+  <b>66.0</b>. The other half of the fix is a single token: after one call the model emits
+  <code>,</code> or <code>]</code>, so that decision carries 6× loss weight in training.</p>
+</div>
+
+<!-- ============ 3. ARCHITECTURE ============ -->
+<section class="col">
+  <p class="eyebrow">The model</p>
+  <h2>A trunk, three heads, and a compiler</h2>
+  <p>A deep-thin transformer — <code>d=448</code>, 20 layers, GQA 8/4, SwiGLU, 8k BPE with tied
+  embeddings, QK-norm, sandwich normalization, gated attention — carrying three capabilities:</p>
+
+  <h3>1 · A retriever</h3>
+  <p>Ranks the catalog against the query <em>and the partial plan</em>, re-running between array
+  elements. This is the DTDR fix above.</p>
+
+  <h3>2 · A name head</h3>
+  <p>A bilinear readout scoring the decision-position hidden state against each candidate's name
+  span in the prompt. The motivation comes from
+  <a href="https://arxiv.org/abs/2606.16364">“Looking Is Not Picking”</a>: models attend to the
+  correct tool 80% of the time and still choose wrong. Tool selection fails at the readout, not at
+  perception — readout-side interventions recover 59–91% of failures, prompt-side fixes at most 23%.
+  So we replaced the readout with a trained one.</p>
+
+  <h3>3 · A grammar-constrained argument decoder</h3>
+  <p>The tokenizer holds a hard contract: JSON structural characters are singleton tokens that never
+  merge into anything else. No token can straddle a structure/value boundary, so the compiler can
+  force-feed structure exactly and consult the model only at the five choice points in Fig. 1.</p>
+
+  <p>Notably we did <em>not</em> clone Needle's Simple Attention Network. Their own paper prices that
+  architecture against a matched-parameter transformer at 0.006 nats. The mixer was never the
+  bottleneck — how the forward pass is spent is.</p>
+</section>
+
+<!-- ============ 4. RESULTS ============ -->
+<section>
+<div class="col">
+  <p class="eyebrow">Results</p>
+  <h2>Mobile Actions, all 961 rows</h2>
+  <p>Ordered strict exact match: a row passes only if the function names, the call order, and every
+  argument value match. Baseline figures are Cactus's published numbers.</p>
+</div>
+
+<div class="instrument bleed">
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr><th>Model</th><th>Params</th><th>Accuracy</th><th>Name acc.</th><th>Non-empty</th>
+        <th>1-call</th><th>2-call</th></tr>
+    </thead>
+    <tbody>
+      <tr class="ours"><td class="model">Thimble (bf16)</td><td>44M</td><td>80.1</td><td>99.5</td>
+        <td>100.0</td><td>87.2</td><td>66.0</td></tr>
+      <tr><td class="model">LFM2.5 230M <span class="dim">f16</span></td><td class="dim">230M</td>
+        <td>69.1</td><td>93.0</td><td>98.9</td><td>76.1</td><td>55.0</td></tr>
+      <tr><td class="model">FunctionGemma 270M <span class="dim">f16</span></td><td class="dim">270M</td>
+        <td>64.0</td><td>87.3</td><td>98.9</td><td>73.0</td><td>46.2</td></tr>
+      <tr><td class="model">Needle 2 <span class="dim">CQ2-bit</span></td><td class="dim">45M</td>
+        <td>63.7</td><td>98.3</td><td>99.4</td><td>71.3</td><td>48.4</td></tr>
+      <tr><td class="model">Apple FM <span class="dim">on-device</span></td><td class="dim">~3B</td>
+        <td>57.6</td><td>94.2</td><td>95.5</td><td>64.5</td><td>43.8</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="icap"><b>Table 1</b> — google/mobile-actions eval split. Our eval rows were firewalled
+  from training throughout.</p>
+</div>
+
+<!-- bar chart -->
+<div class="instrument bleed">
+  <div class="scroll">
+  <svg viewBox="0 0 900 250" role="img" aria-label="Accuracy by parameter count: Thimble 80.1 at 44M, above larger models">
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11">
+      <!-- axis -->
+      <line x1="150" y1="16" x2="150" y2="212" stroke="var(--rule)"/>
+      <g stroke="var(--rule)" stroke-dasharray="2 4">
+        <line x1="300" y1="16" x2="300" y2="212"/>
+        <line x1="450" y1="16" x2="450" y2="212"/>
+        <line x1="600" y1="16" x2="600" y2="212"/>
+        <line x1="750" y1="16" x2="750" y2="212"/>
+      </g>
+      <g fill="var(--faint)" font-size="10" text-anchor="middle">
+        <text x="150" y="230">0</text><text x="300" y="230">20</text><text x="450" y="230">40</text>
+        <text x="600" y="230">60</text><text x="750" y="230">80</text>
+      </g>
+      <text x="450" y="248" text-anchor="middle" fill="var(--faint)" font-size="10"
+        letter-spacing="0.1em">MOBILE ACTIONS ACCURACY (%)</text>
+
+      <!-- bars -->
+      <g>
+        <rect x="150" y="24" width="600.75" height="24" rx="2" fill="var(--accent)"/>
+        <text x="140" y="41" text-anchor="end" fill="var(--ink)" font-weight="600">Thimble 44M</text>
+        <text x="762" y="41" fill="var(--accent)" font-weight="600">80.1</text>
+      </g>
+      <g>
+        <rect x="150" y="60" width="518.25" height="24" rx="2" fill="var(--forced)" opacity="0.5"/>
+        <text x="140" y="77" text-anchor="end" fill="var(--muted)">LFM2.5 230M</text>
+        <text x="680" y="77" fill="var(--muted)">69.1</text>
+      </g>
+      <g>
+        <rect x="150" y="96" width="480" height="24" rx="2" fill="var(--forced)" opacity="0.5"/>
+        <text x="140" y="113" text-anchor="end" fill="var(--muted)">FunctionGemma 270M</text>
+        <text x="641" y="113" fill="var(--muted)">64.0</text>
+      </g>
+      <g>
+        <rect x="150" y="132" width="477.75" height="24" rx="2" fill="var(--forced)"/>
+        <text x="140" y="149" text-anchor="end" fill="var(--ink)">Needle 2 45M</text>
+        <text x="639" y="149" fill="var(--ink)">63.7</text>
+      </g>
+      <g>
+        <rect x="150" y="168" width="432" height="24" rx="2" fill="var(--forced)" opacity="0.5"/>
+        <text x="140" y="185" text-anchor="end" fill="var(--muted)">Apple FM ~3B</text>
+        <text x="593" y="185" fill="var(--muted)">57.6</text>
+      </g>
+    </g>
+  </svg>
+  </div>
+  <p class="icap"><b>Fig. 3</b> — Parameter count is on the labels, not the axis: the 3B model is
+  last and the two 45M models are 16 points apart. Size is not what separates them.</p>
+</div>
+
+<div class="col">
+  <h3>Our own suites</h3>
+  <p>Held-out and out-of-distribution splits, 400 rows each, against a training-free lexical
+  selector as the floor.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Suite</th><th>Lexical floor</th><th>Heads on</th><th>Heads off</th></tr></thead>
+    <tbody>
+      <tr><td class="model">Held-out, in-distribution</td><td class="dim">21.2</td><td>100.0</td><td>100.0</td></tr>
+      <tr><td class="model">Out-of-distribution schemas</td><td class="dim">16.8</td><td>80.2</td><td>80.0</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="icap" style="margin-top:14px"><b>Table 2</b> — “Heads off” is the same trunk emitting
+  JSON without the factorized heads. It is a control, not a product.</p>
+</div>
+</section>
+
+<!-- ============ 5. CAVEATS ============ -->
+<section class="col">
+  <p class="eyebrow">Fair warning</p>
+  <h2>What is unfair about this comparison</h2>
+  <p>Cactus states their asymmetries openly. So will we — in both directions.</p>
+
+  <div class="caveat">
+    <h4>Precision favors us</h4>
+    <p>We report bf16. Needle reports CQ2-bit, measured end-to-end through a shipped C++ binary with
+    a 256-token sliding window and cache eviction live. Quantizing to 2 bits will cost accuracy we
+    have not yet paid.</p>
+  </div>
+  <div class="caveat">
+    <h4>Domain adaptation favors us</h4>
+    <p>Mobile Actions' train split — 8,693 public rows, disjoint from eval — is in our mix. Needle
+    trained on its own device-action corpus. Our eval rows were never seen, so the number is clean;
+    but this is a domain-adapted model measured against a generalist.</p>
+  </div>
+  <div class="caveat">
+    <h4>Deployment favors Needle, enormously</h4>
+    <p>They ship a dependency-free 14MB binary that runs on an ESP32 inside a 28MB RAM ceiling, with
+    2-bit QAT trained from pretraining onward. We have a 168MB bf16 checkpoint and no engine. On the
+    axis they actually optimized for, we are not competitive.</p>
+  </div>
+</section>
+
+<!-- ============ 6. COST ============ -->
+<section class="col">
+  <p class="eyebrow">The bill</p>
+  <h2>One working day, $27</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Item</th><th>Detail</th><th>Cost</th></tr></thead>
+    <tbody>
+      <tr><td class="model">Teacher traces</td><td class="dim">80,599 validated · DeepSeek V4 Flash</td><td>$25.11</td></tr>
+      <tr><td class="model">Training</td><td class="dim">RTX 3090 · 8,397 steps · 3 epochs · ~1 h</td><td>$0.25</td></tr>
+      <tr><td class="model">Evaluation</td><td class="dim">same GPU, parallel suites</td><td>$0.60</td></tr>
+      <tr class="ours"><td class="model">Total</td><td class="dim">146,439 packed rows · 3,335 distinct tools</td><td>$25.96</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="margin-top:22px">The expensive thing was never the compute. It was knowing which 146,000
+  rows to build — and that came from reading the failures, not from scale.</p>
+</section>
+
+<!-- ============ 7. WHAT WENT WRONG ============ -->
+<section class="col">
+  <p class="eyebrow">Post-mortem</p>
+  <h2>The first checkpoint scored zero</h2>
+  <p>Not low. Zero. It refused half the rows outright and mis-selected the rest.</p>
+  <p>The cause wasn't capability. It was shape: we trained on catalogs of 3–9 tools, and Mobile
+  Actions presents 10–16, with a date/time preamble on every query that our data never contained.
+  The model had never seen the form of the question. Adding catalog augmentation and preambles
+  moved it from 0.0 to 80.1.</p>
+
+  <p>Four bugs found by probing intermediate checkpoints, each of which would have silently
+  corrupted the headline:</p>
+  <ol class="bugs">
+    <li><b>Value truncation at 24 tokens.</b> Email bodies cut mid-sentence, failing exact match on
+      rows the model had otherwise answered perfectly.</li>
+    <li><b>A device mismatch</b> in the head/LM ensemble that crashed every constrained decode the
+      moment it ran on GPU.</li>
+    <li><b>Tokenizer alignment breaking on non-ASCII.</b> <code>&lt;unk&gt;</code> is a five-character
+      token string standing in for one character, which silently desynchronized every loss tag
+      after it.</li>
+    <li><b>A schema that lies.</b> Mobile Actions advertises datetimes as
+      <code>YYYY-MM-DDTHH:MM:SS</code>; its gold values use a space separator. We had written a
+      grammar template from the schema text. Checking gold data instead of trusting prose caught it
+      before it cost 365 rows.</li>
+  </ol>
+</section>
+
+<!-- ============ 8. OPEN ============ -->
+<section class="col">
+  <p class="eyebrow">Still open</p>
+  <h2>What we don't know yet</h2>
+  <p><strong>The name head is on probation.</strong> Against the same-trunk ablation it wins by 1.5
+  points out-of-distribution with a small training set — and ties once the training set is large.
+  The plan says we drop the heads if they can't beat the control. That verdict is pending on the
+  harder suites.</p>
+  <p><strong>Seal-Tools, DroidCall, BFCL v4 and ACEBench</strong> are still running or unbuilt. No
+  claims are made about them here. Seal-Tools is the one that matters most: it holds out entire
+  domains, which is the real test of whether the architecture generalizes or whether we simply
+  learned Mobile Actions.</p>
+  <p><strong>And 2-bit.</strong> Everything above is bf16. Needle's headline achievement is that
+  their 14MB artifact <em>is</em> the model they trained. Ours isn't quantized at all yet, and that
+  is the honest distance left between a benchmark result and a thing you can put on a doorbell.</p>
+</section>
+
+</div>
+
+<footer class="wrap">
+  <span>Thimble · 44M · MIT</span>
+  <span>Trained 16 Aug 2026 · one RTX 3090</span>
+</footer>
+
+<script>
+(function(){
+  var b=document.getElementById('themeBtn');
+  b.addEventListener('click',function(){
+    var r=document.documentElement;
+    var cur=r.getAttribute('data-theme');
+    if(!cur){
+      cur=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+    }
+    r.setAttribute('data-theme',cur==='dark'?'light':'dark');
+  });
+})();
+</script>
+</body>
+</html>
