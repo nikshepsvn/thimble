@@ -93,12 +93,11 @@ class _Decoder:
         best = max(range(len(options)), key=lambda i: lp[first_ids[i]].item())
         return options[best]
 
-    def choose_str(self, options: list[str]) -> str:
-        """Pick among literal strings by length-normalized teacher-forced logprob
-        (mean per-token). Used for names and enum values, which can share
-        prefixes and differ in length. Cache is rolled back after each rollout."""
-        best, best_lp = options[0], -float("inf")
+    def score_str(self, options: list[str]) -> list[float]:
+        """Length-normalized teacher-forced logprob (mean per-token) for each
+        literal. Cache is rolled back after each rollout."""
         snap = self.snapshot()
+        scores = []
         for opt in options:
             ids = self.tok.encode(opt)
             lp = 0.0
@@ -107,10 +106,12 @@ class _Decoder:
                 lp += torch.log_softmax(logits.float(), dim=-1)[i].item()
                 self.feed_id(i)
             self.rollback(snap)
-            mean_lp = lp / max(1, len(ids))
-            if mean_lp > best_lp:
-                best, best_lp = opt, mean_lp
-        return best
+            scores.append(lp / max(1, len(ids)))
+        return scores
+
+    def choose_str(self, options: list[str]) -> str:
+        scores = self.score_str(options)
+        return options[max(range(len(options)), key=lambda i: scores[i])]
 
     def gen_string_value(self, closing: str = '"') -> str:
         """Free-generate a string value until the closing quote token. String
@@ -212,18 +213,18 @@ def constrained_decode(
             break
         dec.feed_str(open_opt)
 
-        # choice 2: name among refreshed candidates
+        # choice 2: name among refreshed candidates. heads-on ensembles the
+        # trained readout (wins off-distribution) with the LM's teacher-forced
+        # logprob (wins in-distribution); heads-off is the pure-LM ablation
         cands = retrieve(query, tools, k=k, emitted=emitted)
         cand_names = [t["name"] for t in cands]
-        if use_name_head and name_spans:
-            spans = [name_spans[n] for n in cand_names if n in name_spans]
-            names_with_spans = [n for n in cand_names if n in name_spans]
-            if spans:
-                hidden = dec.hidden()
-                scores = model.name_scores(hidden, len(dec.ids) - 1, spans)
-                name = names_with_spans[int(scores.argmax().item())]
-            else:
-                name = dec.choose_str(cand_names)
+        if use_name_head and name_spans and all(n in name_spans for n in cand_names):
+            hidden = dec.hidden()
+            head = model.name_scores(hidden, len(dec.ids) - 1, [name_spans[n] for n in cand_names])
+            head_p = torch.softmax(head.float(), dim=-1)
+            lm = torch.tensor(dec.score_str(cand_names))
+            lm_p = torch.softmax(lm, dim=-1)
+            name = cand_names[int((head_p + lm_p).argmax().item())]
         else:
             name = dec.choose_str(cand_names)
         dec.feed_str(name)
