@@ -24,16 +24,42 @@ from tiny_toolcall.schema import canon_calls
 API = "https://openrouter.ai/api/v1/chat/completions"
 VOLUME_MODEL = "deepseek/deepseek-v4-flash"
 
+DOMAINS = [
+    "smart home lighting", "thermostats and HVAC", "door locks and security", "robot vacuum",
+    "coffee machine", "washing machine", "EV charging", "garage door", "plant watering",
+    "pet feeder", "aquarium control", "air purifier", "smart blinds", "sprinkler system",
+    "car controls", "dashcam", "phone settings", "camera app", "flashlight and torch",
+    "alarms and timers", "calendar", "reminders and todos", "contacts", "sms messaging",
+    "email", "notes app", "voice memos", "music playback", "podcast player", "audiobooks",
+    "tv and streaming", "smart speaker", "navigation and maps", "rideshare booking",
+    "food delivery", "grocery list", "fitness tracker", "sleep tracking", "meditation app",
+    "smartwatch health", "translation", "weather", "news briefing", "stock quotes",
+    "banking transfers", "expense tracking", "file manager", "printer", "screen casting",
+    "wifi and bluetooth settings", "drone control", "3d printer", "sous vide cooker",
+]
+
+STYLES = [
+    "terse, like a command", "polite full sentence", "casual with a typo or two",
+    "as a question", "impatient and short", "verbose with extra context",
+    "lowercase no punctuation", "mentions a person or place by name",
+]
+
 SYSTEM = """You generate training data for a tiny on-device function-calling model.
-Given tool schemas and a template, produce ONE example as strict JSON:
-{"query": "...", "answers": [{"name": "...", "arguments": {...}} , ...]}
+Produce ONE example as strict JSON. When asked to invent tools, output:
+{"tools": [{"name": "...", "description": "...", "parameters": {"type": "object", "properties": {"arg": {"type": "string|integer|number|boolean"}}, "required": ["..."]}}, ...],
+ "query": "...", "answers": [{"name": "...", "arguments": {...}}, ...]}
+When tools are provided, output only {"query": ..., "answers": ...}.
 Rules:
-- query: natural, casual, sometimes terse or messy user phrasing. Vary style.
+- tools (when inventing): 3-7 plausible tools for the given domain, snake_case
+  names, 0-4 parameters each, some optional. Include 1-2 tools NOT needed by the
+  query as distractors. Optionally use an enum for one parameter.
+- query: natural user phrasing in the requested style. Vary vocabulary.
 - answers: the exact calls the query asks for, in order. [] if the query is
-  off-topic for every tool (template=refuse).
+  off-topic for every tool (template=refuse) — for refuse, still invent tools
+  but make the query about something none of them can do.
 - Include an argument ONLY if the query gives evidence for its value. Never
-  invent optional arguments. Argument values must be copyable from the query
-  (numbers may be written as digits in both).
+  invent optional arguments. String argument values must be copyable from the
+  query; numbers may appear as digits in both.
 - No prose, no markdown, JSON only."""
 
 
@@ -117,22 +143,63 @@ class SpendCap:
                 raise RuntimeError(f"spend cap hit: ${self.spent:.2f} > ${self.cap}")
 
 
+def _valid_invented_tools(raw) -> list[dict] | None:
+    if not isinstance(raw, list) or not (2 <= len(raw) <= 9):
+        return None
+    out = []
+    for t in raw:
+        if not isinstance(t, dict) or not isinstance(t.get("name"), str):
+            return None
+        params = t.get("parameters") or {}
+        props = params.get("properties")
+        if props is None and not params:
+            props = {}
+        if not isinstance(props, dict):
+            return None
+        for k, spec in props.items():
+            if not isinstance(spec, dict):
+                return None
+            if spec.get("type") not in (None, "string", "integer", "number", "boolean", "object", "array"):
+                return None
+        req = [r for r in (params.get("required") or []) if r in props]
+        out.append({
+            "name": t["name"].strip(),
+            "description": str(t.get("description", "")).strip(),
+            "parameters": {"type": "object", "properties": props, "required": req},
+        })
+    if len({t["name"] for t in out}) != len(out):
+        return None
+    return out
+
+
 async def _one_trace(
     client: httpx.AsyncClient,
     sem: asyncio.Semaphore,
     cap: SpendCap,
     rng: random.Random,
     model: str,
+    seen: set[str],
 ) -> dict | None:
     template = rng.choices(["one", "two", "three", "refuse"], weights=[45, 30, 10, 15])[0]
-    n_tools = rng.randint(3, 8)
-    tools = rng.sample(TRAIN, min(n_tools, len(TRAIN)))
-    schemas = [tool_schema(t) for t in tools]
-    tools_by_name = {s["name"]: s for s in schemas}
-    user = (
-        f"template={template}\ntools:\n{json.dumps(schemas, ensure_ascii=False)}\n"
-        "Generate one example now."
-    )
+    style = rng.choice(STYLES)
+    invent = rng.random() < 0.7  # 30% stays on the device-control anchor catalog
+    if invent:
+        domain = rng.choice(DOMAINS)
+        user = (
+            f"template={template}\nstyle={style}\ndomain={domain}\n"
+            "Invent tools for this domain, then generate one example now."
+        )
+        schemas: list[dict] = []
+        tools_by_name: dict[str, dict] = {}
+    else:
+        n_tools = rng.randint(3, 8)
+        tools = rng.sample(TRAIN, min(n_tools, len(TRAIN)))
+        schemas = [tool_schema(t) for t in tools]
+        tools_by_name = {s["name"]: s for s in schemas}
+        user = (
+            f"template={template}\nstyle={style}\ntools:\n{json.dumps(schemas, ensure_ascii=False)}\n"
+            "Generate one example now."
+        )
     messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
     for _ in range(2):
         async with sem:
@@ -142,8 +209,9 @@ async def _one_trace(
                     json={
                         "model": model,
                         "messages": messages,
-                        "temperature": 0.9,
-                        "max_tokens": 500,
+                        "temperature": 1.0,
+                        "max_tokens": 1600 if invent else 600,
+                        "reasoning": {"enabled": False},  # thinking off per plan
                         "provider": {"sort": "exacto"},
                     },
                     timeout=90,
@@ -157,13 +225,30 @@ async def _one_trace(
         text = msg.get("content") or ""
         try:
             ex = _extract_json(text)
-            err = _validate(ex, tools_by_name, template) if ex else "not valid JSON"
+            err = None
+            row_schemas = schemas
+            row_by_name = tools_by_name
+            if ex is None:
+                err = "not valid JSON"
+            elif invent:
+                row_schemas = _valid_invented_tools(ex.get("tools")) or []
+                row_by_name = {s["name"]: s for s in row_schemas}
+                if not row_schemas:
+                    err = "invalid invented tools"
+            if err is None and ex is not None:
+                err = _validate(ex, row_by_name, template)
+            if err is None and ex is not None:
+                q_norm = " ".join(ex["query"].lower().split())
+                if q_norm in seen:
+                    err = "duplicate query, produce a different one"
+                else:
+                    seen.add(q_norm)
         except Exception as e:  # a malformed teacher reply must never kill the batch
             ex, err = None, f"validator error: {e}"
         if err is None and ex is not None:
             return {
                 "query": ex["query"].strip(),
-                "tools": schemas,
+                "tools": row_schemas,
                 "answers": canon_calls(ex["answers"]),
                 "kind": template,
                 "split": "teacher",
@@ -187,12 +272,19 @@ async def synth_teacher(n: int, out: Path, model: str = VOLUME_MODEL, concurrenc
     sem = asyncio.Semaphore(concurrency)
     ok = bad = 0
     out.parent.mkdir(parents=True, exist_ok=True)
+    seen: set[str] = set()
+    if out.exists():  # dedup against earlier runs appending to the same file
+        for line in out.read_text().splitlines():
+            try:
+                seen.add(" ".join(json.loads(line)["query"].lower().split()))
+            except (json.JSONDecodeError, KeyError):
+                pass
     async with httpx.AsyncClient(headers={"Authorization": f"Bearer {key}"}) as client:
         with out.open("a") as f:
             for start in range(0, n, 200):
                 batch = min(200, n - start)
                 results = await asyncio.gather(
-                    *(_one_trace(client, sem, cap, rng, model) for _ in range(batch))
+                    *(_one_trace(client, sem, cap, rng, model, seen) for _ in range(batch))
                 )
                 for tr in results:
                     if tr is None:
