@@ -153,9 +153,13 @@ async def _one_trace(
                 return None
         body = r.json()
         await cap.add(body.get("usage"))
-        text = (body.get("choices") or [{}])[0].get("message", {}).get("content", "")
-        ex = _extract_json(text)
-        err = _validate(ex, tools_by_name, template) if ex else "not valid JSON"
+        msg = (body.get("choices") or [{}])[0].get("message") or {}
+        text = msg.get("content") or ""
+        try:
+            ex = _extract_json(text)
+            err = _validate(ex, tools_by_name, template) if ex else "not valid JSON"
+        except Exception as e:  # a malformed teacher reply must never kill the batch
+            ex, err = None, f"validator error: {e}"
         if err is None and ex is not None:
             return {
                 "query": ex["query"].strip(),
