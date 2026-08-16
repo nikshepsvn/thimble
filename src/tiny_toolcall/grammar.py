@@ -303,7 +303,12 @@ def constrained_decode(
                 # peakedness: how far the prior is from uniform (0 = no signal)
                 uniform = 1.0 / len(cand_names)
                 peak = float(lp.max()) - uniform
-                w = min(LEX_MAX_WEIGHT, max(0.0, peak * LEX_SHARPNESS))
+                # two independent conditions must both hold before the prior gets
+                # weight: it must discriminate, AND the model must be unsure.
+                # Sharpness alone cost 2.7 points on catalogs the model knows well.
+                srt = torch.sort(probs, descending=True).values
+                confidence = float(srt[0] - srt[1])
+                w = min(LEX_MAX_WEIGHT, max(0.0, peak * LEX_SHARPNESS)) * (1.0 - confidence)
                 probs = (1.0 - w) * probs + w * lp
         name = cand_names[int(probs.argmax().item())]
         dec.feed_str(name)
