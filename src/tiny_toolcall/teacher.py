@@ -24,6 +24,27 @@ from tiny_toolcall.schema import canon_calls
 API = "https://openrouter.ai/api/v1/chat/completions"
 VOLUME_MODEL = "deepseek/deepseek-v4-flash"
 
+NAMING = [
+    "snake_case (set_lights)", "camelCase (setLights)", "PascalCase (SetLights)",
+    "dot.notation (lights.set)", "camelCase with a get/search/create verb prefix",
+    "SCREAMING_SNAKE for intent-style names (ACTION_SEND_EMAIL)",
+]
+
+# beyond device control: the domains our first corpus never touched
+WIDE_DOMAINS = [
+    "academic sociology research APIs", "film and media databases", "chemistry lab instruments",
+    "genomics pipelines", "clinical trial registries", "legal case search", "patent search",
+    "enterprise CRM", "HR and payroll", "supply chain logistics", "warehouse robotics",
+    "freight tracking", "insurance claims", "mortgage underwriting", "stock and options trading",
+    "crypto exchange", "tax filing", "invoice reconciliation", "hotel and flight booking",
+    "restaurant reservations", "museum collections", "library catalogues", "weather modelling",
+    "seismology sensors", "satellite imagery", "agricultural sensors", "energy grid telemetry",
+    "water treatment control", "manufacturing QA", "CI/CD pipelines", "Kubernetes operations",
+    "observability and alerting", "feature flags", "A/B experiment platforms", "ad campaign management",
+    "email marketing", "customer support ticketing", "e-commerce order management",
+    "sports statistics", "election data", "public transit schedules", "geological surveys",
+]
+
 DOMAINS = [
     "smart home lighting", "thermostats and HVAC", "door locks and security", "robot vacuum",
     "coffee machine", "washing machine", "EV charging", "garage door", "plant watering",
@@ -50,9 +71,10 @@ Produce ONE example as strict JSON. When asked to invent tools, output:
  "query": "...", "answers": [{"name": "...", "arguments": {...}}, ...]}
 When tools are provided, output only {"query": ..., "answers": ...}.
 Rules:
-- tools (when inventing): 3-7 plausible tools for the given domain, snake_case
-  names, 0-4 parameters each, some optional. Include 1-2 tools NOT needed by the
-  query as distractors. Optionally use an enum for one parameter.
+- tools (when inventing): 3-8 plausible tools for the given domain, named in the
+  EXACT naming convention requested, 0-4 parameters each, some optional. Include
+  1-2 tools NOT needed by the query as distractors. Optionally use an enum for one
+  parameter. Some tools may legitimately take zero parameters.
 - query: natural user phrasing in the requested style. Vary vocabulary.
 - answers: the exact calls the query asks for, in order. [] if the query is
   off-topic for every tool (template=refuse) — for refuse, still invent tools
@@ -184,10 +206,14 @@ async def _one_trace(
     style = rng.choice(STYLES)
     invent = rng.random() < 0.7  # 30% stays on the device-control anchor catalog
     if invent:
-        domain = rng.choice(DOMAINS)
+        # half the invented rows come from domains far outside device control, and
+        # the naming convention is sampled — the first corpus was 99.6% snake_case,
+        # which is why the model failed on camelCase benchmarks
+        domain = rng.choice(WIDE_DOMAINS if rng.random() < 0.6 else DOMAINS)
+        naming = rng.choice(NAMING)
         user = (
-            f"template={template}\nstyle={style}\ndomain={domain}\n"
-            "Invent tools for this domain, then generate one example now."
+            f"template={template}\nstyle={style}\ndomain={domain}\nnaming={naming}\n"
+            "Invent tools for this domain using that naming convention, then generate one example now."
         )
         schemas: list[dict] = []
         tools_by_name: dict[str, dict] = {}
