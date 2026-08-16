@@ -222,7 +222,7 @@ def constrained_decode(
             hidden = dec.hidden()
             head = model.name_scores(hidden, len(dec.ids) - 1, [name_spans[n] for n in cand_names])
             head_p = torch.softmax(head.float(), dim=-1)
-            lm = torch.tensor(dec.score_str(cand_names))
+            lm = torch.tensor(dec.score_str(cand_names), device=head_p.device)
             lm_p = torch.softmax(lm, dim=-1)
             name = cand_names[int((head_p + lm_p).argmax().item())]
         else:
