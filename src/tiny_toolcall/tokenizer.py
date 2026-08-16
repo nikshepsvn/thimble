@@ -90,6 +90,13 @@ def train_bpe(texts: list[str], vocab_size: int = 8192) -> BPETokenizer:
     vocab slot so encode() hits the whole-word fast path.
     """
     vocab: dict[str, int] = {s: i for i, s in enumerate(SPECIALS)}
+    # full printable ASCII up front so unseen-domain chars (phone '+', '%', …)
+    # never fall to <unk> at eval time
+    import string
+
+    for ch in string.printable:
+        if ch not in vocab:
+            vocab[ch] = len(vocab)
     freq: Counter[tuple[str, ...]] = Counter()
     for text in texts:
         for word in pretokenize(text):

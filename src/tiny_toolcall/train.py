@@ -145,7 +145,7 @@ def train(
     if device.type != "cuda":
         batch = min(batch, 16)
     else:
-        batch = min(batch, 64)  # 24GB with bf16 activations; raise on bigger cards
+        batch = min(batch, 32)  # 24GB with bf16 activations; raise on bigger cards
 
     muon_p, adamw_p = split_params(model)
     opt_m = Muon(muon_p, lr=float(tr.get("lr_muon", 0.02)), weight_decay=float(tr.get("wd", 0.01)))
