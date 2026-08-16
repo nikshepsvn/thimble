@@ -27,6 +27,25 @@ def test_forward_shapes():
     assert scores.shape == (2,)
 
 
+def test_kv_cache_matches_full_forward():
+    torch.manual_seed(0)
+    cfg = Config(vocab_size=128, d_model=64, n_layers=3, n_heads=4, n_kv=2)
+    model = ToolTransformer(cfg).eval()
+    ids = torch.randint(0, 128, (1, 25))
+    with torch.no_grad():
+        full_logits, full_hidden = model(ids)
+        caches = model.new_caches()
+        parts_l, parts_h = [], []
+        for chunk in (ids[:, :10], ids[:, 10:11], ids[:, 11:20], ids[:, 20:]):
+            lo, hi = model(chunk, caches=caches)
+            parts_l.append(lo)
+            parts_h.append(hi)
+    inc_logits = torch.cat(parts_l, dim=1)
+    inc_hidden = torch.cat(parts_h, dim=1)
+    assert torch.allclose(full_logits, inc_logits, atol=1e-4), (full_logits - inc_logits).abs().max()
+    assert torch.allclose(full_hidden, inc_hidden, atol=1e-4)
+
+
 def test_grammar_decode_well_formed_untrained():
     """An untrained model must still produce schema-valid calls under the grammar
     (possibly wrong ones) — well-formedness is structural, not learned."""

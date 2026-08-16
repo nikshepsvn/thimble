@@ -67,9 +67,42 @@ def main() -> None:
         except Exception as e:  # gated/renamed sets shouldn't kill the rest
             print(f"SKIP eval {repo}: {e}")
 
-    if args.eval_only:
-        return
+    _seal_tools()
+    if not args.eval_only:
+        _layer_a(load_dataset, token)
 
+
+def _seal_tools() -> None:
+    """Seal-Tools lives on GitHub, not HF: clone shallow, copy the eval jsons."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    if (EVAL / "seal_tools_out_domain.json").exists():
+        return
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", "https://github.com/fairyshine/Seal-Tools", td],
+                check=True, capture_output=True, timeout=300,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            print(f"SKIP seal-tools: {e}")
+            return
+        found = 0
+        for p in Path(td).rglob("*.json"):
+            low = p.name.lower()
+            if "test_in_domain" in low or "test_out_domain" in low:
+                dest = EVAL / f"seal_tools_{'in' if 'in_domain' in low else 'out'}_domain.json"
+                shutil.copy(p, dest)
+                found += 1
+            elif "train" in low and "seal" not in low and p.stat().st_size > 1_000_000:
+                RAW.mkdir(parents=True, exist_ok=True)
+                shutil.copy(p, RAW / f"seal_tools_{p.name}")
+        print(f"eval  Seal-Tools: {found} test files copied" if found else "SKIP seal-tools: test files not found in repo layout")
+
+
+def _layer_a(load_dataset, token) -> None:
     # ---- Layer A: train seeds (schemas + queries; never SFT'd raw) ----
     jobs_raw = [
         ("google/mobile-actions", None, "train", lambda r: r.get("metadata") != "eval", "mobile_actions_train.jsonl"),

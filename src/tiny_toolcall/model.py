@@ -61,18 +61,34 @@ class Attn(nn.Module):
         self.q_norm = RMSNorm(d)
         self.k_norm = RMSNorm(d)
 
-    def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, cache: dict | None = None
+    ) -> torch.Tensor:
         b, t, _ = x.shape
         q = self.q_norm(self.q(x).view(b, t, self.n_heads, self.head_dim)).transpose(1, 2)
         k = self.k_norm(self.k(x).view(b, t, self.n_kv, self.head_dim)).transpose(1, 2)
         v = self.v(x).view(b, t, self.n_kv, self.head_dim).transpose(1, 2)
         q = q * cos + rotate(q) * sin
         k = k * cos + rotate(k) * sin
+        attn_mask = None
+        causal = True
+        if cache is not None:
+            if "k" in cache:
+                k = torch.cat([cache["k"], k], dim=2)
+                v = torch.cat([cache["v"], v], dim=2)
+            cache["k"], cache["v"] = k, v
+            past = k.shape[2] - t
+            if past > 0:
+                causal = False
+                if t > 1:  # multi-token feed onto existing cache: offset causal mask
+                    i = torch.arange(t, device=x.device)[:, None]
+                    j = torch.arange(k.shape[2], device=x.device)[None, :]
+                    attn_mask = (j <= past + i)[None, None]
         if self.n_kv != self.n_heads:
             rep = self.n_heads // self.n_kv
             k = k.repeat_interleave(rep, dim=1)
             v = v.repeat_interleave(rep, dim=1)
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, is_causal=causal)
         y = y.transpose(1, 2).contiguous().view(b, t, -1)
         y = y * torch.sigmoid(self.gate(x))
         return self.o(y)
@@ -91,8 +107,10 @@ class Block(nn.Module):
         self.w2 = nn.Linear(hidden, cfg.d_model, bias=False)
         self.w3 = nn.Linear(cfg.d_model, hidden, bias=False)
 
-    def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-        x = x + self.n2(self.attn(self.n1(x), cos, sin))
+    def forward(
+        self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, cache: dict | None = None
+    ) -> torch.Tensor:
+        x = x + self.n2(self.attn(self.n1(x), cos, sin, cache))
         n = self.n3(x)
         x = x + self.n4(self.w2(F.silu(self.w1(n)) * self.w3(n)))
         return x
@@ -108,21 +126,29 @@ class ToolTransformer(nn.Module):
         self.name_head = nn.Linear(cfg.d_model, cfg.d_model, bias=False)
         self.register_buffer("inv_freq", _inv_freq(cfg), persistent=False)
 
-    def rope(self, t: int, device: torch.device, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
-        pos = torch.arange(t, device=device, dtype=self.inv_freq.dtype)
+    def rope(self, t: int, device: torch.device, dtype: torch.dtype, offset: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
+        pos = torch.arange(offset, offset + t, device=device, dtype=self.inv_freq.dtype)
         freqs = torch.outer(pos, self.inv_freq)
         cos = torch.cat([freqs.cos(), freqs.cos()], dim=-1)[None, None, :, :].to(dtype)
         sin = torch.cat([freqs.sin(), freqs.sin()], dim=-1)[None, None, :, :].to(dtype)
         return cos, sin
 
-    def forward(self, ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, ids: torch.Tensor, caches: list[dict] | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """caches: per-layer dicts mutated in place for incremental decoding;
+        RoPE offset is inferred from the cached length."""
         x = self.embed(ids)
-        cos, sin = self.rope(ids.shape[1], ids.device, x.dtype)
-        for blk in self.blocks:
-            x = blk(x, cos, sin)
+        offset = caches[0]["k"].shape[2] if caches and "k" in caches[0] else 0
+        cos, sin = self.rope(ids.shape[1], ids.device, x.dtype, offset=offset)
+        for li, blk in enumerate(self.blocks):
+            x = blk(x, cos, sin, caches[li] if caches is not None else None)
         x = self.norm(x)
         logits = F.linear(x, self.embed.weight)
         return logits, x
+
+    def new_caches(self) -> list[dict]:
+        return [{} for _ in range(self.cfg.n_layers)]
 
     def name_scores(
         self, hidden: torch.Tensor, decision_pos: int, cand_spans: list[tuple[int, int]], batch: int = 0
