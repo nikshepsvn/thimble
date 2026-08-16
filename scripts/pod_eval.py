@@ -32,6 +32,7 @@ def main() -> None:
     ap.add_argument("--n-eval", type=int, default=1000)
     ap.add_argument("--n-ood", type=int, default=750)
     ap.add_argument("--n-ma", type=int, default=0)
+    ap.add_argument("--suite", default="", help="run only this suite (local-eval|local-ood|mobile-actions)")
     args = ap.parse_args()
 
     tok = BPETokenizer.load(ROOT / "data" / "tokenizer.json")
@@ -52,6 +53,8 @@ def main() -> None:
         rows = mobile_actions_rows(ma)
         suites.append(("mobile-actions", rows[: args.n_ma] if args.n_ma else rows))
 
+    if args.suite:
+        suites = [(n, r) for n, r in suites if n == args.suite]
     for name, rows in suites:
         print(f"\n=== {name} (n={len(rows)}) ===")
         print("S2       :", fmt(score_predictor(rows, predict_s2)))

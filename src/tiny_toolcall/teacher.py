@@ -212,13 +212,16 @@ async def _one_trace(
                         "temperature": 1.0,
                         "max_tokens": 1600 if invent else 600,
                         "reasoning": {"enabled": False},  # thinking off per plan
-                        "provider": {"sort": "exacto"},
+                        "provider": {"sort": "throughput"},
                     },
                     timeout=90,
                 )
                 r.raise_for_status()
-            except (httpx.HTTPError, RuntimeError):
+            except RuntimeError:
                 return None
+            except httpx.HTTPError:
+                await asyncio.sleep(2 + rng.random() * 3)
+                continue
         body = r.json()
         await cap.add(body.get("usage"))
         msg = (body.get("choices") or [{}])[0].get("message") or {}
@@ -279,18 +282,26 @@ async def synth_teacher(n: int, out: Path, model: str = VOLUME_MODEL, concurrenc
                 seen.add(" ".join(json.loads(line)["query"].lower().split()))
             except (json.JSONDecodeError, KeyError):
                 pass
-    async with httpx.AsyncClient(headers={"Authorization": f"Bearer {key}"}) as client:
+    limits = httpx.Limits(max_connections=400, max_keepalive_connections=100)
+    async with httpx.AsyncClient(headers={"Authorization": f"Bearer {key}"}, limits=limits) as client:
         with out.open("a") as f:
-            for start in range(0, n, 200):
-                batch = min(200, n - start)
-                results = await asyncio.gather(
-                    *(_one_trace(client, sem, cap, rng, model, seen) for _ in range(batch))
-                )
-                for tr in results:
+            # rolling window: results are consumed as they finish, so a straggler
+            # never stalls the pipeline (batch-gather waited on the slowest of 200)
+            for start in range(0, n, 5000):
+                chunk = min(5000, n - start)
+                tasks = [
+                    asyncio.ensure_future(_one_trace(client, sem, cap, rng, model, seen))
+                    for _ in range(chunk)
+                ]
+                for fut in asyncio.as_completed(tasks):
+                    tr = await fut
                     if tr is None:
                         bad += 1
                     else:
                         f.write(json.dumps(tr, ensure_ascii=False) + "\n")
                         ok += 1
-                print(f"teacher: {ok} ok / {bad} rejected, ~${cap.spent:.2f} spent")
+                    if (ok + bad) % 2000 == 0:
+                        print(f"teacher: {ok} ok / {bad} rejected, ~${cap.spent:.2f} spent")
+                        f.flush()
+    print(f"teacher final: {ok} ok / {bad} rejected, ~${cap.spent:.2f} spent")
     return {"ok": ok, "rejected": bad, "spent_usd": round(cap.spent, 2)}

@@ -38,14 +38,52 @@ def cmd_synth(args) -> None:
 
 
 def _train_rows() -> list[dict]:
-    """Training mix: local synth + teacher traces when present."""
+    """Training mix: local synth + teacher traces, with MA-shaped augmentation."""
     rows = _read_rows(DATA / "seeds" / "local_train.jsonl")
     teacher = DATA / "synth" / "teacher.jsonl"
     if teacher.exists():
         trows = _read_rows(teacher)
         rows = rows + trows
         print(f"mix: {len(rows) - len(trows)} local + {len(trows)} teacher")
-    return rows
+    return _augment(rows)
+
+
+def _augment(rows: list[dict]) -> list[dict]:
+    """Close the observed eval-distribution gaps without API cost:
+    (a) big catalogs — official suites show 10-16 tools, training peaked at 9;
+        top up ~40% of rows with distractor schemas pooled across the mix
+    (b) context preamble — Mobile Actions prepends date/time lines to every
+        query; zero-shot, those made the model refuse half the rows
+    """
+    rng = random.Random(11)
+    pool: list[dict] = []
+    for r in rows:
+        pool.extend(r["tools"])
+    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    out = []
+    for r in rows:
+        r = dict(r)
+        if pool and rng.random() < 0.4:
+            have = {t["name"] for t in r["tools"]}
+            target = rng.randint(10, 16)
+            tools = list(r["tools"])
+            for _ in range(40):
+                if len(tools) >= target:
+                    break
+                cand = pool[rng.randrange(len(pool))]
+                if cand["name"] not in have:
+                    tools.append(cand)
+                    have.add(cand["name"])
+            rng.shuffle(tools)
+            r["tools"] = tools
+        if rng.random() < 0.35:
+            dt = f"2026-{rng.randint(1,12):02d}-{rng.randint(1,28):02d}T{rng.randint(0,23):02d}:{rng.randint(0,59):02d}:{rng.randint(0,59):02d}"
+            r["query"] = (
+                f"Current date and time given in YYYY-MM-DDTHH:MM:SS format: {dt} "
+                f"Day of week is {rng.choice(days)}\n{r['query']}"
+            )
+        out.append(r)
+    return out
 
 
 def cmd_tok(args) -> None:
