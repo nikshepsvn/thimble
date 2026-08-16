@@ -44,3 +44,63 @@ Both directions, following Cactus's own practice:
 DroidCall (200), Seal-Tools in/out (700/654), BFCL v4 single-turn (3,641; their
 "overall" is the unweighted mean over 13 raw categories), ACEBench Normal.
 No harness exists for these yet — no claims are made about them.
+
+---
+
+# v1 post-mortem: the Seal-Tools collapse (2026-08-16, evening)
+
+The v1 checkpoint scored **1.0%** on Seal-Tools in-domain and **0.9%** out-of-domain,
+against Needle 2's 32.6 / 28.7 — below even a training-free lexical baseline.
+
+## Root cause
+
+Our teacher prompt instructed the generator to invent tools with `snake_case` names.
+It complied, for all 80,599 traces:
+
+| Corpus | snake_case | camelCase |
+|---|---|---|
+| our v1 training data | 99.6% | 0.0% |
+| Seal-Tools | 0.3% | 99.7% |
+
+The model had never seen a camelCase function name. Worse, our snake_case names
+tokenize as *single* tokens (`set_lights` → 1 token) while camelCase names fragment
+into 6–12 subwords (`getPostmodernTheory` → `get P ost moder n The ory`), so name
+scoring operated in an entirely different regime from the one it was trained on.
+
+Two symptoms followed: the model refused 39% of rows outright, and among the ~5
+candidates it did consider, it picked correctly 27% of the time — barely above the
+20% chance rate.
+
+## Fixes, measured independently
+
+**1. camelCase-aware retrieval.** The retriever lowercased before tokenizing, so
+`getPostmodernTheory` collapsed to one opaque token and matched nothing. Splitting on
+case boundaries first took the lexical baseline's name accuracy from 26.6% → **90.7%**
+on Seal-Tools in-domain. That figure is itself the finding: self-describing API
+catalogs are nearly solved by string overlap, whereas device-verb catalogs
+(Mobile Actions, lexical name-acc 66.5%) are not.
+
+**2. Lexical prior, gated on two conditions.** Three variants, 150 rows each:
+
+| Decode variant | Seal-Tools acc / name | Mobile Actions acc / name |
+|---|---|---|
+| ungated (v1 behaviour) | 3.3 / 24.0 | 78.0 / 100.0 |
+| hard confidence gate | 8.0 / 48.0 | 78.0 / 100.0 |
+| prior weighted by sharpness alone | 10.0 / 56.7 | 75.3 / 96.7 |
+| **sharpness × model uncertainty** | **8.7 / 54.0** | **78.0 / 100.0** |
+
+The prior earns weight only when it discriminates on that catalog *and* the model is
+unsure. Weighting on sharpness alone overrode the model on catalogs it knows well and
+cost 2.7 points on Mobile Actions; requiring both conditions recovers them.
+Spurious refusals fell 39% → 23%.
+
+**3. Round-2 data.** 33,736 new traces across four naming conventions
+(snake_case, camelCase, PascalCase, dot.notation, SCREAMING_SNAKE) and 42 domains
+outside device control. Corpus now 114,335 traces; training set 178,947 rows.
+
+## The honest reading
+
+Mobile Actions 80.1 was a domain-adapted result. Seal-Tools is what a genuinely
+unfamiliar catalog does to this model, and the answer was: it collapses. The
+architecture didn't fail — the corpus was a monoculture, and one line of a teacher
+prompt caused it.
