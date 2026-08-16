@@ -47,14 +47,19 @@ class _Decoder:
         self.last_logits: torch.Tensor | None = None
 
     def _feed_ids(self, ids: list[int]) -> None:
+        """Feed tokens, updating the KV cache. The vocabulary projection is done
+        for the LAST position only — the decoder never reads logits for tokens it
+        already force-fed, so projecting a whole chunk wastes |vocab| work per
+        structural token (Needle's engine makes the same skip)."""
         if not ids:
             return
         x = torch.tensor([ids], dtype=torch.long, device=self.device)
         with torch.no_grad():
-            logits, hidden = self.model(x, caches=self.caches)
+            _, hidden = self.model(x, caches=self.caches, need_logits=False)
+            last = torch.nn.functional.linear(hidden[0, -1], self.model.embed.weight)
         self.ids.extend(ids)
         self.hiddens.append(hidden)
-        self.last_logits = logits[0, -1]
+        self.last_logits = last
 
     def feed_str(self, s: str) -> None:
         self._feed_ids(self.tok.encode(s))
@@ -300,9 +305,23 @@ def constrained_decode(
                 args[key] = val == "true"
             elif typ in ("integer", "number"):
                 s = dec.gen_number_value()
-                args[key] = json.loads(s)
-                if typ == "integer" and isinstance(args[key], float):
-                    args[key] = int(args[key])
+                try:
+                    val = json.loads(s)
+                    if not isinstance(val, (int, float)):
+                        raise ValueError(s)
+                except (json.JSONDecodeError, ValueError):
+                    # generator can assemble char-valid but JSON-invalid strings
+                    # (e.g. "1-2", "3.4.5"); keep the longest valid numeric prefix
+                    val = 0
+                    for cut in range(len(s), 0, -1):
+                        try:
+                            cand = json.loads(s[:cut])
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                        if isinstance(cand, (int, float)):
+                            val = cand
+                            break
+                args[key] = int(val) if typ == "integer" and isinstance(val, float) else val
             else:
                 dec.feed_str('"')
                 shape = _value_template(key, spec)

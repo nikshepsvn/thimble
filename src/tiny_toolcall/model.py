@@ -136,17 +136,22 @@ class ToolTransformer(nn.Module):
         return cos, sin
 
     def forward(
-        self, ids: torch.Tensor, caches: list[dict] | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        self, ids: torch.Tensor, caches: list[dict] | None = None, need_logits: bool = True
+    ) -> tuple[torch.Tensor | None, torch.Tensor]:
         """caches: per-layer dicts mutated in place for incremental decoding;
-        RoPE offset is inferred from the cached length."""
+        RoPE offset is inferred from the cached length.
+
+        need_logits=False skips the vocabulary projection — on grammar-forced
+        tokens the output is already determined, so only the KV cache update
+        matters and the |vocab| matmul is pure waste.
+        """
         x = self.embed(ids)
         offset = caches[0]["k"].shape[2] if caches and "k" in caches[0] else 0
         cos, sin = self.rope(ids.shape[1], ids.device, x.dtype, offset=offset)
         for li, blk in enumerate(self.blocks):
             x = blk(x, cos, sin, caches[li] if caches is not None else None)
         x = self.norm(x)
-        logits = F.linear(x, self.embed.weight)
+        logits = F.linear(x, self.embed.weight) if need_logits else None
         return logits, x
 
     def new_caches(self) -> list[dict]:
