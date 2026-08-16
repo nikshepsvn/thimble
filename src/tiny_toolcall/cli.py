@@ -115,6 +115,16 @@ def cmd_eval(args) -> None:
             print(_fmt(score_predictor(rows, pred)))
 
 
+def cmd_teacher(args) -> None:
+    import asyncio
+
+    from tiny_toolcall.teacher import synth_teacher
+
+    out = DATA / "synth" / "teacher.jsonl"
+    stats = asyncio.run(synth_teacher(args.n, out, concurrency=args.concurrency, seed=args.seed))
+    print(stats)
+
+
 def cmd_overfit(args) -> None:
     """Prove the loop: tiny model, 200 rows, then decode those same rows."""
     args.n = 200
@@ -172,6 +182,12 @@ def main() -> None:
     p = sub.add_parser("overfit")
     p.add_argument("--epochs", type=int, default=0)
     p.set_defaults(fn=cmd_overfit)
+
+    p = sub.add_parser("teacher")
+    p.add_argument("n", type=int)
+    p.add_argument("--concurrency", type=int, default=24)
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(fn=cmd_teacher)
 
     args = ap.parse_args()
     args.fn(args)

@@ -1,10 +1,11 @@
 model:
+  # d=512/22L/2.5 was ~70M; this is ~44M with an 8k vocab (see test_param_budget_45m)
   vocab_size: 8192
-  d_model: 512
-  n_layers: 22
+  d_model: 448
+  n_layers: 20
   n_heads: 8
   n_kv: 4
-  ffn_mult: 2.5
+  ffn_mult: 2.0
   rope_theta: 10000.0
   max_seq: 512
   retrieve_k: 5
