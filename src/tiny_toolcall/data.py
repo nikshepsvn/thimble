@@ -9,6 +9,7 @@ the pretokenizer, so tags never straddle a token).
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,28 @@ import numpy as np
 
 from tiny_toolcall.render import T_PAD, render_example
 from tiny_toolcall.tokenizer import BOS, EOS, PAD, BPETokenizer
+
+_PUNCT = {"‘": "'", "’": "'", "“": '"', "”": '"', "–": "-", "—": "-", " ": " ", "…": "..."}
+
+
+def normalize_text(s: str) -> str:
+    s = unicodedata.normalize("NFKC", s)
+    for k, v in _PUNCT.items():
+        s = s.replace(k, v)
+    return s
+
+
+def normalize_example(ex: dict[str, Any]) -> dict[str, Any]:
+    """Consistent ASCII-leaning normalization of query and string arg values so
+    copyable spans stay copyable after tokenization."""
+    ex = dict(ex)
+    ex["query"] = normalize_text(ex["query"])
+    calls = []
+    for c in ex["answers"]:
+        args = {k: normalize_text(v) if isinstance(v, str) else v for k, v in (c.get("arguments") or {}).items()}
+        calls.append({"name": c["name"], "arguments": args})
+    ex["answers"] = calls
+    return ex
 
 
 def token_char_offsets(tok: BPETokenizer, ids: list[int]) -> list[int]:
@@ -64,11 +87,17 @@ def pack_examples(
     j's name — the readout position for the name head.
     """
     rows_ids, rows_tags, rows_dec, kept = [], [], [], []
-    skipped = 0
+    skipped = bad_chars = 0
     for ex in examples:
+        ex = normalize_example(ex)
         prompt, call, char_tags = render_example(ex)
         p_ids = tok.encode(prompt)
         c_ids = tok.encode(call)
+        # rows with unencodable chars break char->token alignment (<unk> is a
+        # 5-char token string standing in for 1 char) — drop them
+        if tok.decode(c_ids) != call or tok.decode(p_ids) != prompt:
+            bad_chars += 1
+            continue
         total = 1 + len(p_ids) + len(c_ids) + 1
         if total > seq_len:
             skipped += 1
@@ -112,8 +141,8 @@ def pack_examples(
         rows_tags.append(tags)
         rows_dec.append(dec)
         kept.append(ex)
-    if skipped:
-        print(f"pack: skipped {skipped} examples over {seq_len} tokens")
+    if skipped or bad_chars:
+        print(f"pack: skipped {skipped} over {seq_len} tokens, {bad_chars} with unencodable chars")
     return (
         np.array(rows_ids, dtype=np.uint16),
         np.array(rows_tags, dtype=np.uint8),

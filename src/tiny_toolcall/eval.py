@@ -27,8 +27,11 @@ def predict_s2(ex: dict[str, Any]) -> list[dict[str, Any]] | None:
 
 
 def score_predictor(rows: list[dict[str, Any]], predict: Callable[[dict], list | None]) -> dict[str, float]:
+    from tiny_toolcall.data import normalize_example
+
     scored = []
     for ex in rows:
+        ex = normalize_example(ex)  # same normalization as training pack
         pred = predict(ex)
         scored.append({"gold": ex["answers"], "pred": pred})
     return score_rows(scored)
