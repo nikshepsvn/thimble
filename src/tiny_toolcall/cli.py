@@ -38,13 +38,17 @@ def cmd_synth(args) -> None:
 
 
 def _train_rows() -> list[dict]:
-    """Training mix: local synth + teacher traces, with MA-shaped augmentation."""
+    """Training mix: local synth + teacher traces + official train seeds,
+    with MA-shaped augmentation."""
     rows = _read_rows(DATA / "seeds" / "local_train.jsonl")
-    teacher = DATA / "synth" / "teacher.jsonl"
-    if teacher.exists():
-        trows = _read_rows(teacher)
-        rows = rows + trows
-        print(f"mix: {len(rows) - len(trows)} local + {len(trows)} teacher")
+    counts = {"local": len(rows)}
+    for name, path in (("teacher", DATA / "synth" / "teacher.jsonl"),
+                       ("official", DATA / "seeds" / "official_train.jsonl")):
+        if path.exists():
+            extra = _read_rows(path)
+            counts[name] = len(extra)
+            rows += extra
+    print("mix:", counts)
     return _augment(rows)
 
 
@@ -76,7 +80,8 @@ def _augment(rows: list[dict]) -> list[dict]:
                     have.add(cand["name"])
             rng.shuffle(tools)
             r["tools"] = tools
-        if rng.random() < 0.35:
+        if rng.random() < 0.35 and not r["query"].startswith("Current date"):
+            # official MA rows already carry their real preamble — don't double it
             dt = f"2026-{rng.randint(1,12):02d}-{rng.randint(1,28):02d}T{rng.randint(0,23):02d}:{rng.randint(0,59):02d}:{rng.randint(0,59):02d}"
             r["query"] = (
                 f"Current date and time given in YYYY-MM-DDTHH:MM:SS format: {dt} "

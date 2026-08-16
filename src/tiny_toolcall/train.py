@@ -159,12 +159,18 @@ def train(
     t0 = time.time()
     ids_t = torch.from_numpy(ids.astype(np.int64))
     tags_t = torch.from_numpy(tags.astype(np.int64))
+    # length-bucketed batching: sort by real length, batch neighbours, trim each
+    # batch to its own max length (multiple of 64) — ~3x less pad compute
+    real_len = (ids != 0).sum(axis=1)
+    order = np.argsort(real_len, kind="stable")
+    batches = [order[s : s + batch] for s in range(0, n, batch)]
     for ep in range(epochs):
-        perm = np.random.permutation(n)
-        for s in range(0, n, batch):
-            sel = perm[s : s + batch]
-            bi = ids_t[sel].to(device)
-            bt = tags_t[sel].to(device)
+        np.random.shuffle(batches)
+        for sel in batches:
+            blen = int(real_len[sel].max())
+            blen = min(seq_len, (blen + 63) // 64 * 64)
+            bi = ids_t[sel][:, :blen].to(device)
+            bt = tags_t[sel][:, :blen].to(device)
             bd = [decisions[j] for j in sel]
             loss, stats = step_loss(model, bi, bt, bd, weights)
             for opt in (opt_m, opt_a):

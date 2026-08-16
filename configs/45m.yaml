@@ -7,7 +7,7 @@ model:
   n_kv: 4
   ffn_mult: 2.0
   rope_theta: 10000.0
-  max_seq: 512
+  max_seq: 640
   retrieve_k: 5
 
 loss:
