@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="light">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Thimble — a 44M tool-caller</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -26,22 +27,6 @@
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
   --s1:8px; --s2:16px; --s3:26px; --s4:42px; --s5:68px; --s6:104px;
 }
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --ground:#0E1114; --raise:#161A1F; --sink:#1B2026;
-    --ink:#E9ECEE; --muted:#9BA3AD; --faint:#6C737C;
-    --rule:#242A31; --hair:#1E242A;
-    --accent:#54BECB; --accent-dim:#2C6771; --forced:#6C737C;
-    --good:#6CC195; --warn:#D19B67;
-  }
-}
-:root[data-theme="dark"]{
-  --ground:#0E1114; --raise:#161A1F; --sink:#1B2026;
-  --ink:#E9ECEE; --muted:#9BA3AD; --faint:#6C737C;
-  --rule:#242A31; --hair:#1E242A;
-  --accent:#54BECB; --accent-dim:#2C6771; --forced:#6C737C;
-  --good:#6CC195; --warn:#D19B67;
-}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--ground);color:var(--ink);
@@ -55,7 +40,7 @@ section.col{display:block}
 p{margin:0 0 1.15em}
 a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-dim)}
 a:hover{border-bottom-color:var(--accent)}
-a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 strong{font-weight:600}
 code{font-family:var(--mono);font-size:.83em;background:var(--sink);padding:.1em .35em;border-radius:3px}
 
@@ -65,15 +50,12 @@ header.top{padding:20px 0;border-bottom:1px solid var(--hair);margin-bottom:52px
 .wordmark{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase}
 .wordmark span{color:var(--faint);font-weight:400}
 .topmeta{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
-button.theme{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:none;
-  border:1px solid var(--rule);color:var(--faint);padding:5px 10px;border-radius:2px;cursor:pointer}
-button.theme:hover{color:var(--ink);border-color:var(--faint)}
 
 /* article head */
 .hero{padding:0 0 8px}
 .kicker{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--accent);margin:0 0 16px}
-h1{font-size:34px;line-height:1.2;letter-spacing:-.02em;margin:0 0 20px;font-weight:600;max-width:24ch}
+h1{font-size:36px;line-height:1.18;letter-spacing:-.022em;margin:0 0 22px;font-weight:600;max-width:26ch}
 .standfirst{font-size:19px;line-height:1.62;color:var(--muted);max-width:68ch;margin:0 0 1em}
 .standfirst b{color:var(--ink);font-weight:600}
 
@@ -154,15 +136,14 @@ svg{display:block;max-width:100%;height:auto}
   <div class="wrap topbar">
     <span class="wordmark">Thimble <span>· 44M</span></span>
     <span class="topmeta">Technical report · 16 Aug 2026</span>
-    <button class="theme" id="themeBtn" type="button">Theme</button>
   </div>
 </header>
 
 <div class="wrap">
 
 <div class="col hero">
-  <p class="kicker">Thimble · a 44M-parameter function caller</p>
-  <h1>A small model that turns a sentence into a function call</h1>
+  <p class="kicker">16 August 2026</p>
+  <h1>Introducing Thimble: a 44M model that turns a sentence into a function call</h1>
 
   <p class="standfirst">A smart speaker, a watch, a robot vacuum — each exposes its abilities as
   typed functions, and each needs something to translate <em>“dim the kitchen to thirty”</em> into
@@ -175,6 +156,11 @@ svg{display:block;max-width:100%;height:auto}
   cannot hold a conversation and never sees prose in training. At 44 million parameters it is small
   enough to run on a phone, and narrow enough to beat models sixty-eight times its size at this one
   job.</p>
+
+  <p class="standfirst">On Google's Mobile Actions it is, as far as we can find, <b>the
+  highest-scoring model ever measured on that benchmark at any size</b> — and the smallest model in
+  the comparison by parameter count. It is not the smallest to deploy: that title still belongs to
+  Needle 2, and the last section explains why.</p>
 
   <p class="standfirst">What follows is how it works, what it scores, and — at some length — the
   ways the comparison flatters it.</p>
@@ -489,7 +475,9 @@ svg{display:block;max-width:100%;height:auto}
     <p class="eyebrow">Results</p>
     <h2>Mobile Actions, all 961 rows</h2>
     <p class="lede">Ordered strict exact match: a row passes only if the function names, the call
-    order, and every argument value match.</p>
+    order, and every argument value match. Thimble leads every column — accuracy, name accuracy,
+    non-empty rate, single-call and two-call — against every model Cactus published, at the
+    smallest parameter count in the table.</p>
   </div>
 
   <figure class="plate wide">
@@ -708,12 +696,5 @@ svg{display:block;max-width:100%;height:auto}
   <span>One RTX 3090 · 16 Aug 2026</span>
 </footer>
 
-<script>
-document.getElementById('themeBtn').addEventListener('click',function(){
-  var r=document.documentElement,c=r.getAttribute('data-theme');
-  if(!c){c=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}
-  r.setAttribute('data-theme',c==='dark'?'light':'dark');
-});
-</script>
 </body>
 </html>
