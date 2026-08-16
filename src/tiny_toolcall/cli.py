@@ -144,9 +144,18 @@ def cmd_train(args) -> None:
     if args.n:
         ids, tags, dec = ids[: args.n], tags[: args.n], dec[: args.n]
     model = build(tok.vocab_size, **{k: v for k, v in cfg.get("model", {}).items() if k != "vocab_size"})
+    if getattr(args, "init", ""):
+        # warm start: the tokenizer is unchanged, so weights transfer exactly
+        import torch
+
+        blob = torch.load(CKPT / f"{args.init}.pt", map_location="cpu", weights_only=False)
+        model.load_state_dict(blob["model"])
+        print(f"warm-started from {args.init}.pt")
     print(f"params: {model.count_params()/1e6:.2f}M  device: {pick_device()}")
     if args.epochs:
         cfg.setdefault("train", {})["epochs"] = args.epochs
+    if getattr(args, "lr_scale", 1.0) != 1.0:
+        cfg.setdefault("train", {})["lr_scale"] = args.lr_scale
     stats = train(model, ids, tags, dec, cfg, save_path=CKPT / f"{args.name}.pt")
     print("final:", stats)
 
@@ -262,6 +271,8 @@ def main() -> None:
     p.add_argument("--n", type=int, default=0)
     p.add_argument("--epochs", type=int, default=0)
     p.add_argument("--name", default="sft")
+    p.add_argument("--init", default="", help="warm-start from this checkpoint name")
+    p.add_argument("--lr-scale", type=float, default=1.0, help="scale LRs (use <1 when warm-starting)")
     p.set_defaults(fn=cmd_train)
 
     p = sub.add_parser("eval")

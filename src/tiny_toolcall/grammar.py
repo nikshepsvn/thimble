@@ -25,10 +25,19 @@ from typing import Any
 
 import torch
 
-from tiny_toolcall.retrieve import retrieve
+from tiny_toolcall.retrieve import lexical_scores, retrieve
 from tiny_toolcall.tokenizer import BOS, BPETokenizer
 
 MAX_CALLS = 4
+# The lexical prior is weighted by how *discriminative* it is on this catalog,
+# not by a fixed constant. Self-describing catalogs (getPostmodernTheory answering
+# "postmodern theory") produce a sharply peaked prior and deserve weight; device
+# verbs (set_lights for "dim the kitchen") produce a flat one and do not. A hard
+# confidence gate cannot express this: the model is often confidently wrong on
+# an unfamiliar catalog, so the gate never opens.
+LEX_MAX_WEIGHT = 0.85   # ceiling on the prior's share when it is maximally peaked
+LEX_SHARPNESS = 4.0     # how fast peakedness converts to weight
+REFUSE_GATE = 0.35
 MAX_VALUE_TOKENS = 96  # email bodies and addresses run long; truncation was costing exact-match
 
 
@@ -97,6 +106,11 @@ class _Decoder:
         first_ids = [self.tok.encode(o)[0] for o in options]
         best = max(range(len(options)), key=lambda i: lp[first_ids[i]].item())
         return options[best]
+
+    def score_first(self, options: list[str]) -> list[float]:
+        """Per-option first-token logprob (branch decisions)."""
+        lp = torch.log_softmax(self.next_logits().float(), dim=-1)
+        return [lp[self.tok.encode(o)[0]].item() for o in options]
 
     def score_str(self, options: list[str]) -> list[float]:
         """Length-normalized teacher-forced logprob (mean per-token) for each
@@ -227,6 +241,7 @@ def constrained_decode(
     k: int = 0,
     use_name_head: bool = True,
     name_spans: dict[str, tuple[int, int]] | None = None,
+    gated: bool = True,
 ) -> list[dict[str, Any]]:
     """Decode a canonical call array under the grammar. Returns parsed calls.
 
@@ -247,8 +262,20 @@ def constrained_decode(
     for _ in range(MAX_CALLS):
         # choice 1 / 5: stop ( ] ) or (another) call ( { first, , later )
         open_opt = '{"name":"' if not emitted else ',{"name":"'
-        choice = dec.choose_first(["]", open_opt])
-        if choice == "]":
+        stop_lp = dec.score_first(["]", open_opt])
+        refuse = stop_lp[0] >= stop_lp[1]
+        if refuse and gated and not emitted:
+            # a confident refusal stands; a marginal one loses to clear evidence
+            # that some tool in the catalog answers the query
+            lex = lexical_scores(query, tools)
+            if lex:
+                peak = max(lex.values()) - 1.0 / max(2, len(lex))
+                margin = abs(stop_lp[0] - stop_lp[1])
+                # strong evidence overrides a refusal outright; weak evidence only
+                # overrides a marginal one
+                if peak > 0.25 or (margin < REFUSE_GATE and peak > 0.08):
+                    refuse = False
+        if refuse:
             dec.feed_str("]")
             break
         dec.feed_str(open_opt)
@@ -264,9 +291,21 @@ def constrained_decode(
             head_p = torch.softmax(head.float(), dim=-1)
             lm = torch.tensor(dec.score_str(cand_names), device=head_p.device)
             lm_p = torch.softmax(lm, dim=-1)
-            name = cand_names[int((head_p + lm_p).argmax().item())]
+            probs = (head_p + lm_p) / 2
         else:
-            name = dec.choose_str(cand_names)
+            lm = torch.tensor(dec.score_str(cand_names))
+            probs = torch.softmax(lm, dim=-1)
+        if gated and len(cand_names) > 1:
+            lex = lexical_scores(query, cands, emitted=emitted)
+            lp = torch.tensor([lex.get(n, 0.0) for n in cand_names], device=probs.device)
+            if float(lp.sum()) > 0:
+                lp = lp / lp.sum()
+                # peakedness: how far the prior is from uniform (0 = no signal)
+                uniform = 1.0 / len(cand_names)
+                peak = float(lp.max()) - uniform
+                w = min(LEX_MAX_WEIGHT, max(0.0, peak * LEX_SHARPNESS))
+                probs = (1.0 - w) * probs + w * lp
+        name = cand_names[int(probs.argmax().item())]
         dec.feed_str(name)
         tool = next(t for t in tools if t["name"] == name)
         dec.feed_str('","arguments":{')

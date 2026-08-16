@@ -138,7 +138,12 @@ def train(
     model.to(device)
     model.train()
     weights = loss_weights_from_cfg(cfg.get("loss", {}), device)
-    tr = cfg.get("train", {})
+    tr = dict(cfg.get("train", {}))
+    scale = float(tr.pop("lr_scale", 1.0))
+    if scale != 1.0:
+        tr["lr_muon"] = float(tr.get("lr_muon", 0.02)) * scale
+        tr["lr_adam"] = float(tr.get("lr_adam", 3e-4)) * scale
+        print(f"lr scaled x{scale}: muon={tr['lr_muon']:.4f} adam={tr['lr_adam']:.2e}")
     epochs = int(tr.get("epochs", 4))
     seq_len = ids.shape[1]
     batch = max(1, int(tr.get("global_tokens", 65536)) // seq_len)
