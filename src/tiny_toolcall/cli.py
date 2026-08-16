@@ -37,11 +37,22 @@ def cmd_synth(args) -> None:
     print(f"wrote {len(rows)} -> {out}")
 
 
+def _train_rows() -> list[dict]:
+    """Training mix: local synth + teacher traces when present."""
+    rows = _read_rows(DATA / "seeds" / "local_train.jsonl")
+    teacher = DATA / "synth" / "teacher.jsonl"
+    if teacher.exists():
+        trows = _read_rows(teacher)
+        rows = rows + trows
+        print(f"mix: {len(rows) - len(trows)} local + {len(trows)} teacher")
+    return rows
+
+
 def cmd_tok(args) -> None:
     from tiny_toolcall.render import render_example
     from tiny_toolcall.tokenizer import train_bpe
 
-    rows = _read_rows(DATA / "seeds" / "local_train.jsonl")
+    rows = _train_rows()
     rng = random.Random(0)
     sample = rng.sample(rows, min(args.sample, len(rows)))
     texts = []
@@ -60,12 +71,15 @@ def cmd_pack(args) -> None:
     from tiny_toolcall.tokenizer import BPETokenizer
 
     tok = BPETokenizer.load(TOK_PATH)
-    rows = _read_rows(DATA / "seeds" / f"local_{args.split}.jsonl")
+    rows = _train_rows() if args.split == "train" else _read_rows(DATA / "seeds" / f"local_{args.split}.jsonl")
+    random.Random(7).shuffle(rows)  # interleave sources
     if args.n:
         rows = rows[: args.n]
-    ids, tags, dec = pack_examples(rows, tok, seq_len=args.seq_len)
+    ids, tags, dec, kept = pack_examples(rows, tok, seq_len=args.seq_len)
     out = DATA / "packed" / args.split
     save_packed(out, ids, tags, dec)
+    # the exact rows packed, in order — evals must read this, not the seeds file
+    (out / "rows.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in kept))
     print(f"packed {ids.shape} -> {out}  (mean real len {int((ids != 0).sum(1).mean())})")
 
 

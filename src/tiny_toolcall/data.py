@@ -55,14 +55,15 @@ def name_spans_in_prompt(tok: BPETokenizer, prompt: str, prompt_ids: list[int], 
 
 def pack_examples(
     examples: list[dict[str, Any]], tok: BPETokenizer, seq_len: int = 512
-) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
-    """Returns (ids [N,L] uint16, tags [N,L] uint8, decisions per example).
+) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Returns (ids [N,L] uint16, tags [N,L] uint8, decisions, kept_rows).
+    kept_rows aligns 1:1 with the arrays (over-length examples are skipped).
 
     decisions[i] = {"names": [...], "spans": [[s,e],...], "pos": [...], "gold": [...]}
     where pos[j] is the sequence index whose *next-token* prediction starts call
     j's name — the readout position for the name head.
     """
-    rows_ids, rows_tags, rows_dec = [], [], []
+    rows_ids, rows_tags, rows_dec, kept = [], [], [], []
     skipped = 0
     for ex in examples:
         prompt, call, char_tags = render_example(ex)
@@ -110,12 +111,14 @@ def pack_examples(
         rows_ids.append(ids)
         rows_tags.append(tags)
         rows_dec.append(dec)
+        kept.append(ex)
     if skipped:
         print(f"pack: skipped {skipped} examples over {seq_len} tokens")
     return (
         np.array(rows_ids, dtype=np.uint16),
         np.array(rows_tags, dtype=np.uint8),
         rows_dec,
+        kept,
     )
 
 
