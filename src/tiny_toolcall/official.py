@@ -71,7 +71,10 @@ def seal_tools_rows(path: Path) -> list[dict[str, Any]]:
             for pname, spec in (api.get("parameters") or {}).items():
                 spec = spec or {}
                 props[pname] = {
-                    "type": _PY_TYPE.get(str(spec.get("type", "str")), "string"),
+                    # Seal-Tools quotes every gold value, including numerics
+                    # ("1986"), so its declared int/float types contradict its own
+                    # answers. Follow the data, not the declaration.
+                    "type": "string",
                     "description": spec.get("description", ""),
                 }
             tools.append({

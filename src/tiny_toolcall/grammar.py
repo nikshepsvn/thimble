@@ -138,6 +138,7 @@ class _Decoder:
         only specials are banned — the quote singleton is the exact terminator."""
         close_id = self.tok.vocab[closing]
         out: list[str] = []
+        ids_out: list[int] = []
         for _ in range(MAX_VALUE_TOKENS):
             logits = self.next_logits()
             masked = logits.clone()
@@ -146,10 +147,22 @@ class _Decoder:
                 tid = self.tok.vocab.get(sp)
                 if tid is not None:
                     masked[tid] = -float("inf")
+            # greedy decoding of a copied span degenerates into loops
+            # ("the city in the city in..."), which fails exact match outright.
+            # Ban any token that would complete a repeated trigram, and stop on a
+            # repeated bigram — a copied value is never periodic.
+            if len(ids_out) >= 2:
+                pair = (ids_out[-2], ids_out[-1])
+                for i in range(len(ids_out) - 2):
+                    if (ids_out[i], ids_out[i + 1]) == pair:
+                        masked[ids_out[i + 2]] = -float("inf")
             nxt = int(masked.argmax().item())
             if nxt == close_id:
                 break
+            if len(ids_out) >= 4 and ids_out[-2:] == [nxt, ids_out[-1]]:
+                break  # alternating repetition
             self.feed_id(nxt)
+            ids_out.append(nxt)
             out.append(self.tok.token_str(nxt))
         return "".join(out)
 
