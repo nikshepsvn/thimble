@@ -38,6 +38,7 @@ MAX_CALLS = 4
 LEX_MAX_WEIGHT = 0.85   # ceiling on the prior's share when it is maximally peaked
 LEX_SHARPNESS = 4.0     # how fast peakedness converts to weight
 REFUSE_GATE = 0.35
+REPEAT_BLOCK = True
 MAX_VALUE_TOKENS = 96  # email bodies and addresses run long; truncation was costing exact-match
 
 
@@ -151,16 +152,23 @@ class _Decoder:
             # ("the city in the city in..."), which fails exact match outright.
             # Ban any token that would complete a repeated trigram, and stop on a
             # repeated bigram — a copied value is never periodic.
-            if len(ids_out) >= 2:
-                pair = (ids_out[-2], ids_out[-1])
-                for i in range(len(ids_out) - 2):
-                    if (ids_out[i], ids_out[i + 1]) == pair:
-                        masked[ids_out[i + 2]] = -float("inf")
             nxt = int(masked.argmax().item())
             if nxt == close_id:
                 break
-            if len(ids_out) >= 4 and ids_out[-2:] == [nxt, ids_out[-1]]:
-                break  # alternating repetition
+            # Only PERIODIC repetition is degenerate. Natural prose repeats
+            # bigrams constantly ("in the", "to the"), so banning repeated
+            # trigrams mangles long values — that mistake cost 51 points on
+            # Mobile Actions. A loop instead shows the last k tokens exactly
+            # equalling the k before them.
+            if REPEAT_BLOCK:
+                cand = ids_out + [nxt]
+                looped = False
+                for k in (2, 3, 4):
+                    if len(cand) >= 3 * k and cand[-k:] == cand[-2 * k:-k] == cand[-3 * k:-2 * k]:
+                        looped = True
+                        break
+                if looped:
+                    break
             self.feed_id(nxt)
             ids_out.append(nxt)
             out.append(self.tok.token_str(nxt))
