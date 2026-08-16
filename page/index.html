@@ -161,15 +161,24 @@ svg{display:block;max-width:100%;height:auto}
 <div class="wrap">
 
 <div class="col hero">
-  <p class="kicker">Thimble · 44M parameters · Apache-style open weights</p>
-  <h1>A 44M function-calling model that cannot emit invalid JSON</h1>
-  <p class="standfirst">Thimble maps a plain-language request onto a typed function call. It does
-  not chat, summarise, or explain. It reads a catalog of tools and a query, and returns the calls
-  to make — or an empty list when nothing applies.</p>
-  <p class="standfirst">It scores <b>80.1%</b> on Google's Mobile Actions, ahead of every model on
-  Cactus's comparison chart including one at roughly <b>3 billion parameters</b>, and 16.4 points
-  ahead of Needle 2 at the same size. Malformed JSON, invented argument names, and calls to
-  non-existent tools are not merely rare — the decoder cannot express them.</p>
+  <p class="kicker">Thimble · a 44M-parameter function caller</p>
+  <h1>A small model that turns a sentence into a function call</h1>
+
+  <p class="standfirst">A smart speaker, a watch, a robot vacuum — each exposes its abilities as
+  typed functions, and each needs something to translate <em>“dim the kitchen to thirty”</em> into
+  <code>set_lights(room="kitchen", brightness=30)</code>. Today that translation usually costs a
+  network round trip to a model with billions of parameters, most of which exist to write prose
+  nobody asked for.</p>
+
+  <p class="standfirst">Thimble does only the translation. It reads a catalog of tools and a user
+  request and returns the calls to make, or an empty list when nothing in the catalog fits. It
+  cannot hold a conversation and never sees prose in training. At 44 million parameters it is small
+  enough to run on a phone, and narrow enough to beat models sixty-eight times its size at this one
+  job.</p>
+
+  <p class="standfirst">What follows is how it works, what it scores, and — at some length — the
+  ways the comparison flatters it.</p>
+</div>
 
 <div class="col">
   <div class="band">
@@ -185,11 +194,15 @@ svg{display:block;max-width:100%;height:auto}
 </div>
 
 <section class="col">
-  <p class="eyebrow">What it is</p>
+  <p class="eyebrow">The contract</p>
   <h2>Input, output, and nothing else</h2>
-  <p>Thimble takes a tool catalog and a user query, and returns a canonical JSON array of calls.
-  There is no chat surface, no free text, and no reasoning trace. A request outside the catalog
-  returns <code>[]</code> rather than a guess.</p>
+  <p>The interface is deliberately narrow. Declare your tools as JSON Schema, hand over a user
+  message, get back a canonical array of calls. Arguments are typed and sorted; optional arguments
+  appear only when something in the query licenses them; the array is schema-valid by construction
+  rather than by inspection.</p>
+  <p>When a request falls outside the catalog — “tell me a joke”, “what's the capital of France” —
+  the model returns an empty array instead of inventing a plausible-looking call. Refusal is a
+  trained decision with its own place in the grammar, not an accident of sampling.</p>
   <figure class="plate">
     <div class="scroll">
     <svg viewBox="0 0 720 176" role="img" aria-label="Input and output contract: tools plus query in, canonical JSON call array out">
@@ -277,17 +290,24 @@ svg{display:block;max-width:100%;height:auto}
 <section class="col">
   <p class="eyebrow">The bet</p>
   <h2>Tool calling is five decisions, not a generation problem</h2>
-  <p class="lede">Most tool-calling models are language models that write JSON. Ours is a language
-  model that makes five decisions, with the JSON assembled around it by a compiler.</p>
+  <p class="lede">Most tool-calling models are language models that write JSON. Thimble is a
+  language model that makes five decisions, with the JSON assembled around it by a compiler.</p>
 
   <p>Consider what a tool call actually requires. Given a query and a catalog of typed functions,
-  something must decide: does any tool apply, which one, which optional arguments the query
-  licenses, what values fill them, and whether another call follows. Every other token in the
-  output — braces, quotes, commas, and critically <em>every argument key</em> — is fixed by the
-  schema before the model runs.</p>
+  something must decide whether any tool applies, which one, which optional arguments the query
+  licenses, what values fill them, and whether another call follows. That is the entire problem.
+  Every other token in the output — the braces, the quotes, the commas, and critically
+  <em>every argument key</em> — was fixed by the schema before the model ran.</p>
 
-  <p>A model generating JSON as text spends capacity learning that <code>{</code> follows
-  <code>[</code>. At 44M parameters that capacity does not exist. So we don't spend it.</p>
+  <p>A model that generates JSON as text spends real capacity learning that <code>{</code> follows
+  <code>[</code>, and spends it again on every call it makes. At 44 million parameters that capacity
+  does not exist, so we decline to spend it: a grammar compiled from the declared schemas emits the
+  structure, and the model is consulted only where a genuine choice exists.</p>
+
+  <p>The consequence is worth stating precisely, because it is stronger than the usual claim made
+  for constrained decoding. Malformed JSON, hallucinated argument names, and calls to tools that
+  were never declared are not <em>rare</em> in Thimble's output. They are unreachable: no sequence
+  of model decisions produces them.</p>
 </section>
 
 <!-- ===== FIG 2 : DECODE STRIP ===== -->
