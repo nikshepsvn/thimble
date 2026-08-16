@@ -196,7 +196,7 @@ def constrained_decode(
     # retrieval narrows only genuinely large catalogs; small ones stay whole so
     # retrieval recall never caps name accuracy below what the head can do
     if k <= 0:
-        k = len(tools) if len(tools) <= 8 else 5
+        k = len(tools) if len(tools) <= 8 else 8
     dec = _Decoder(model, tok, device)
     dec.feed_id(BOS)  # sequences start with BOS in training; match it here
     dec.feed_str(prompt)

@@ -40,14 +40,20 @@ def cmd_synth(args) -> None:
 def _train_rows() -> list[dict]:
     """Training mix: local synth + teacher traces + official train seeds,
     with MA-shaped augmentation."""
-    rows = _read_rows(DATA / "seeds" / "local_train.jsonl")
+    # local templates saturate fast — cap them so diverse data dominates;
+    # official MA-train is the scarcest, highest-value signal — repeat it 3x
+    rows = _read_rows(DATA / "seeds" / "local_train.jsonl")[:40000]
     counts = {"local": len(rows)}
-    for name, path in (("teacher", DATA / "synth" / "teacher.jsonl"),
-                       ("official", DATA / "seeds" / "official_train.jsonl")):
-        if path.exists():
-            extra = _read_rows(path)
-            counts[name] = len(extra)
-            rows += extra
+    teacher = DATA / "synth" / "teacher.jsonl"
+    if teacher.exists():
+        extra = _read_rows(teacher)
+        counts["teacher"] = len(extra)
+        rows += extra
+    official = DATA / "seeds" / "official_train.jsonl"
+    if official.exists():
+        extra = _read_rows(official)
+        counts["official_x3"] = len(extra) * 3
+        rows += extra * 3
     print("mix:", counts)
     return _augment(rows)
 

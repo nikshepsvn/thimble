@@ -152,18 +152,31 @@ def train(
     opt_a = torch.optim.AdamW(adamw_p, lr=float(tr.get("lr_adam", 3e-4)), weight_decay=float(tr.get("wd", 0.01)))
 
     n = ids.shape[0]
-    steps_total = max(1, math.ceil(n / batch)) * epochs
-    warmup = max(10, steps_total // 20)
     step = 0
     stats: dict[str, float] = {}
     t0 = time.time()
     ids_t = torch.from_numpy(ids.astype(np.int64))
     tags_t = torch.from_numpy(tags.astype(np.int64))
-    # length-bucketed batching: sort by real length, batch neighbours, trim each
-    # batch to its own max length (multiple of 64) — ~3x less pad compute
+    # token-budget batching: sort by real length, fill each batch to a fixed
+    # token budget (rows x padded-len), so short rows train in big batches and
+    # long rows in small ones — ~3x less pad compute at constant memory
     real_len = (ids != 0).sum(axis=1)
     order = np.argsort(real_len, kind="stable")
-    batches = [order[s : s + batch] for s in range(0, n, batch)]
+    budget = batch * 512  # tokens per step, same memory envelope as before
+    batches = []
+    cur: list[int] = []
+    cur_max = 0
+    for idx in order.tolist():
+        length = min(seq_len, (int(real_len[idx]) + 63) // 64 * 64)
+        if cur and ((len(cur) + 1) * max(cur_max, length) > budget or len(cur) >= 128):
+            batches.append(np.array(cur))
+            cur, cur_max = [], 0
+        cur.append(idx)
+        cur_max = max(cur_max, length)
+    if cur:
+        batches.append(np.array(cur))
+    steps_total = len(batches) * epochs
+    warmup = max(10, steps_total // 20)
     for ep in range(epochs):
         np.random.shuffle(batches)
         for sel in batches:
