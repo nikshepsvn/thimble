@@ -185,7 +185,15 @@ def train(
                     f"ep{ep} step{step}/{steps_total} loss={loss.item():.4f} lm={stats['lm']:.4f} "
                     f"name={stats['name']:.4f} name_acc={stats['name_acc']:.3f} tok/s={tps:,.0f}"
                 )
+            if save_path and step % 500 == 0:
+                _save(model, save_path)
     if save_path:
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"model": model.state_dict(), "cfg": model.cfg.__dict__}, save_path)
+        _save(model, save_path)
     return stats
+
+
+def _save(model: ToolTransformer, save_path: Path) -> None:
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = save_path.with_suffix(".tmp")
+    torch.save({"model": model.state_dict(), "cfg": model.cfg.__dict__}, tmp)
+    tmp.replace(save_path)
