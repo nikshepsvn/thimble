@@ -29,7 +29,8 @@ rsync -az -e "ssh -o StrictHostKeyChecking=no -p $PORT" \
   data/seeds/local_eval.jsonl data/seeds/local_ood.jsonl root@"$HOST":/workspace/tiny-toolcall/data/seeds/
 
 echo "== SFT on pod (epochs=$EPOCHS) =="
-$S "cd /workspace/tiny-toolcall && env PYTHONUNBUFFERED=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python -m tiny_toolcall.cli train --name sft --epochs $EPOCHS 2>&1 | tail -8"
+# tee to a pod-side file so step progress (stepN/total) is tail-able live
+$S "cd /workspace/tiny-toolcall && env PYTHONUNBUFFERED=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python -m tiny_toolcall.cli train --name sft --epochs $EPOCHS 2>&1 | tee train.log | tail -8"
 
 echo "== parallel evals =="
 $S 'pkill -f "[p]od_eval" 2>/dev/null || true; cd /workspace/tiny-toolcall; nohup env PYTHONUNBUFFERED=1 python scripts/pod_eval.py --suite local-eval --n-eval 400 > eval_le.log 2>&1 < /dev/null & nohup env PYTHONUNBUFFERED=1 python scripts/pod_eval.py --suite local-ood --n-ood 400 > eval_ood.log 2>&1 < /dev/null & nohup env PYTHONUNBUFFERED=1 python scripts/pod_eval.py --suite mobile-actions --n-ma 400 > eval_ma.log 2>&1 < /dev/null & sleep 2; echo evals-running'
