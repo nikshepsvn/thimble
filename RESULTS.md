@@ -69,3 +69,57 @@ periodic-repetition blocking, and the gated lexical prior (off by default in the
 
 DroidCall (200), BFCL v4 single-turn (3,641), ACEBench Normal. No harness exists
 for these and no claims are made about them.
+
+---
+
+# v3 in progress — the multi-call diagnosis (2026-08-17)
+
+## What was actually wrong with Seal-Tools
+
+Seal-Tools in-domain is 200 single-call rows followed by 500 multi-call rows,
+394 of which need **exactly three calls**. Our v2 training mix was 53% one-call,
+29% two-call, **5% three-call**. We had never taught the model to chain three
+calls, and it scored **0.000 on every multi-call row** — 71% of the benchmark.
+
+(A methodological note: the file is sorted by difficulty, with row ids like
+`test_in_domain-easy-0`. Every 150-row sample we took early on was the easy
+single-call prefix, which is why probes reported 61% name accuracy while the
+full 700-row run reported 18.9%. Sample from the whole file or not at all.)
+
+## The intervention
+
+| Source | Rows | Contributes |
+|---|---|---|
+| xLAM-60k (APIGen, execution-verified) | 60,000 | 3,605 tools |
+| ToolACE | 8,697 | 14,949 tools, incl. names with spaces |
+| Seal-Tools **train** split | 12,020 | 6,637 three-call chains |
+| DroidCall **train** split | 10,051 | Android intents |
+| Round-3 teacher (chain-weighted) | 31,348 | 34% three-call, 14% four-call |
+
+Corpus: 3,300 → **20,376 distinct tools**; 301k → **330k packed rows**.
+A retrained tokenizer cut Seal-Tools prompts 17% (`ACTION_PICK` 10 tokens → 1)
+and recovered 29,650 rows that had exceeded the length budget.
+
+Contamination was verified, not assumed: exact normalized-query overlap between
+all six training sources plus 145k teacher traces and all 2,315 eval queries
+found exactly **one** coincidental collision, which was removed. A firewall now
+enforces this in the training pipeline.
+
+## Mid-training result (warm checkpoint, 34% trained)
+
+| Metric | v2 final | v3 @34% |
+|---|---|---|
+| Seal single-call accuracy | 15.5 | **36.2** |
+| Seal single-call name acc | ~19 | **85.0** |
+| Seal multi-call accuracy | **0.000** | 1.7 |
+| Seal multi-call name acc | ~5 | **35.0** |
+| Emitted the right *number* of calls | ~0 | **69.2** |
+
+The stop decision — the single token choosing `,` over `]` — was the mechanism
+holding multi-call at exactly zero. It is now correct on 69% of rows.
+
+## Remaining wall
+
+A three-call row passes only if all three names *and* all three argument sets
+match. At ~70% per-call name accuracy that compounds to 34% at the sequence
+level before arguments are even considered. Per-call accuracy is the frontier.
