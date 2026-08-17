@@ -63,7 +63,29 @@ def _train_rows() -> list[dict]:
             counts[name] = len(extra) * rep
             rows += extra * rep
     print("mix:", counts)
-    return _augment(rows)
+    return _augment(_firewall(rows))
+
+
+def _firewall(rows: list[dict]) -> list[dict]:
+    """Drop any training row whose query matches an eval query.
+
+    Contamination is checked here rather than trusted from the source splits:
+    one teacher-generated query ("Turn on the light in the kitchen") collided
+    with a Seal-Tools OOD row by coincidence, which is exactly the kind of thing
+    that only shows up if you look.
+    """
+    import re
+
+    f = DATA / "eval_queries.txt"
+    if not f.exists():
+        print("WARNING: no eval-query firewall list; run scripts/build_firewall.py")
+        return rows
+    banned = set(f.read_text().splitlines())
+    norm = lambda q: re.sub(r"\W+", " ", q.lower()).strip()
+    keep = [r for r in rows if norm(r["query"]) not in banned]
+    if len(keep) != len(rows):
+        print(f"firewall: dropped {len(rows) - len(keep)} contaminated rows")
+    return keep
 
 
 def _augment(rows: list[dict]) -> list[dict]:
