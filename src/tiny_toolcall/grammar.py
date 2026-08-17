@@ -137,13 +137,26 @@ class _Decoder:
                         top_k: int = 24) -> str | None:
         """Score candidate spans of the query and copy the best one verbatim.
 
-        90% of gold argument values in Seal-Tools (82% in Mobile Actions) appear
-        verbatim in the query, and Seal-Tools' own paper attributes 70% of
-        parameter errors to keyword-extraction failures. Free token-by-token
-        generation of a value that exists in the prompt is the wrong mechanism:
-        it is what produced truncation, degenerate loops and partial copies.
-        Returns None when no span is clearly preferred, so the caller can fall
-        back to free generation (datetimes, unit conversions, derived values).
+        DISABLED BY DEFAULT — this measured 30 points WORSE than free generation
+        on Seal-Tools single-call (10.0 vs 40.0 exact match, name accuracy
+        unchanged), so the loss is entirely in the arguments.
+
+        The hypothesis came from three sources (Seal-Tools' own error analysis:
+        70% of parameter errors are keyword-extraction failures; LocalAgent, a
+        28M tool-caller: "arg values must be copied, not generated"; FuncBenchGen
+        on stale value propagation) plus our own measurement that 90% of gold
+        values appear "verbatim" in the query.
+
+        That measurement was wrong in a specific way: it tested SUBSTRING
+        containment, while this function enumerates WORD-LEVEL spans. Gold
+        'manta ray' is a substring of the query's "manta rays" but equals no word
+        span of it. Morphology, punctuation and partial-word boundaries break
+        word-span copying on a large fraction of values, and no amount of
+        candidate scoring recovers a span that was never generated. Free
+        generation handles these because it emits tokens, not spans.
+
+        Kept in the tree because a character-level or learned pointer head could
+        still be the right mechanism; the word-span approximation is not.
         """
         words = query.split()
         if not words or len(words) > 120:
@@ -306,7 +319,7 @@ def constrained_decode(
     use_name_head: bool = True,
     name_spans: dict[str, tuple[int, int]] | None = None,
     gated: bool = True,
-    copy_spans: bool = True,
+    copy_spans: bool = False,  # measured WORSE — see note on copy_span_value
 ) -> list[dict[str, Any]]:
     """Decode a canonical call array under the grammar. Returns parsed calls.
 

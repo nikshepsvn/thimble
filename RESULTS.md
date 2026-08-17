@@ -168,3 +168,31 @@ and motivates copying argument values rather than generating them.
 
 Measured on our own data: 90% of Seal-Tools argument values and 82% of Mobile
 Actions values appear verbatim in the query.
+
+## Negative result: word-span copying of argument values
+
+Hypothesis: argument values should be **copied** from the query rather than
+generated token by token. Three independent sources supported it (Seal-Tools'
+error analysis, LocalAgent's pointer head, FuncBenchGen's stale-value finding),
+and we measured that 90% of Seal-Tools gold values appear "verbatim" in the query.
+
+Measured on Seal-Tools single-call, same checkpoint, 80 rows:
+
+| decoding | accuracy | name acc |
+|---|---|---|
+| free generation | **40.0** | 83.8 |
+| word-span copy | 10.0 | 85.0 |
+
+Thirty points worse, with name accuracy unchanged — the entire loss is in the
+arguments the change was meant to fix.
+
+The flaw was in our own measurement. "Verbatim" was tested as *substring*
+containment; the implementation enumerated *word-level* spans. Gold `'manta ray'`
+is a substring of the query's `"manta rays"` but equals no word span of it.
+Morphology, trailing punctuation and partial-word boundaries break word-span
+copying on a large share of values, and candidate scoring cannot recover a span
+that was never generated. Free generation emits tokens and handles these.
+
+Span-copy is disabled by default and kept in the tree: a character-level span
+enumerator or a learned pointer head may still be right. The word-span
+approximation of that idea is not.
