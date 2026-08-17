@@ -137,10 +137,24 @@ class _Decoder:
     def pointer_copy(self, prompt_ids: list[int]) -> str | None:
         """Ask the trained pointer head for a span of the prompt to copy.
 
-        Token-level start/end prediction, so sub-word boundaries are reachable —
-        the failure that sank word-span copying. Returns None unless the head is
-        confident on BOTH endpoints, so uncertain cases fall back to generation
-        (datetimes and other transformed values must not be copied).
+        DISABLED BY DEFAULT — measured 16 points worse on Seal-Tools
+        (25.3 -> 9.3 exact, single-call 56.7 -> 23.3) with name accuracy
+        unchanged, so the entire loss is in the arguments it was built to fix.
+
+        This is the SECOND copy mechanism to fail here, after word-span copying
+        (-30 points). The head does learn: roughly half of training samples hit
+        both endpoints exactly. But its confidence does not correlate with its
+        correctness, so a 0.55 two-endpoint gate still admits wrong spans, and a
+        wrong span is a guaranteed row failure where free generation would often
+        have produced the right value.
+
+        The honest reading is that "copy, don't generate" — well supported in the
+        literature — does not transfer to this setup, because grammar-constrained
+        free generation is already a strong copier (~47% per-call argument
+        accuracy) and both copy mechanisms we built are noisier than that floor.
+        A better-calibrated head (batched training, confidence calibration on a
+        held-out split, span-level rather than endpoint-level scoring) might beat
+        it; ours does not.
         """
         if not hasattr(self.model, "ptr_start"):
             return None
@@ -343,7 +357,7 @@ def constrained_decode(
     name_spans: dict[str, tuple[int, int]] | None = None,
     gated: bool = True,
     copy_spans: bool = False,  # measured WORSE — see note on copy_span_value
-    use_pointer: bool = True,
+    use_pointer: bool = False,  # measured 16 points WORSE — see pointer_copy
 ) -> list[dict[str, Any]]:
     """Decode a canonical call array under the grammar. Returns parsed calls.
 
