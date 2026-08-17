@@ -257,3 +257,40 @@ That single number is the frontier. Named in order of expected value:
 3. More Seal-domain data — weakest lever; names already moved 18.9 → 69.6 on it.
 4. Pretraining — Needle reaches 32.6 *without training on Seal-Tools at all*,
    off 153B tokens against our ~250M. The real structural difference.
+
+## Warm start vs from scratch — the from-scratch model wins
+
+Both trained on the same expanded corpus, in parallel on two GPUs, scored with
+identical code on identical suites. The only differences: initialization, and a
+tokenizer retrained on the full 20,376-tool corpus for the scratch run.
+
+| Suite | v3-warm | **v3-scratch** | delta | Needle 2 |
+|---|---|---|---|---|
+| Mobile Actions (961) | 82.3 | **82.6** | +0.3 | 63.7 |
+| Seal-Tools in (700) | 19.1 | **19.7** | +0.6 | 32.6 |
+| — name accuracy | 70.7 | **76.4** | +5.7 | 64.9 |
+| Seal-Tools out (654) | 11.0 | **14.1** | +3.1 | 28.7 |
+| — name accuracy | 52.0 | **62.1** | +10.1 | 58.7 |
+
+The margin grows with distance from the training domain: +0.3 on device actions,
++3.1 (a 28% relative gain) on held-out API domains. The warm start was anchoring
+the model to device-action territory and cost the most exactly where the domain
+was least familiar. The retrained tokenizer contributed too — 17% shorter
+Seal-Tools prompts and 29,650 rows recovered from the length budget.
+
+**Tool selection now beats Needle on every suite measured**: 99.3 vs 98.3
+(Mobile Actions), 76.4 vs 64.9 (Seal in-domain), 62.1 vs 58.7 (Seal OOD). Every
+remaining deficit is argument precision, not tool choice.
+
+## The name head does not earn its parameters
+
+Mobile Actions scores **82.6 identically** ungated, gated, and heads-off — three
+decimal places apart on none of them. The factorized name head, the readout fix
+motivated by "Looking Is Not Picking", contributes nothing once the trunk is
+trained on sufficient data. Its only positive result all session was +2.2 points
+on a 400-row OOD split at an earlier checkpoint.
+
+Per the plan's own kill criterion — "if the factorized heads do not beat a
+same-trunk JSON-emission ablation, we drop the heads and keep the trunk" — it
+should be removed. That is a negative result about our own headline architectural
+idea, and it makes the model simpler rather than worse.
