@@ -39,6 +39,7 @@ LEX_MAX_WEIGHT = 0.85   # ceiling on the prior's share when it is maximally peak
 LEX_SHARPNESS = 4.0     # how fast peakedness converts to weight
 REFUSE_GATE = 0.35
 REPEAT_BLOCK = True
+PTR_GATE = 0.55   # min softmax mass on the chosen start AND end before copying
 MAX_VALUE_TOKENS = 96  # email bodies and addresses run long; truncation was costing exact-match
 
 
@@ -132,6 +133,28 @@ class _Decoder:
     def choose_str(self, options: list[str]) -> str:
         scores = self.score_str(options)
         return options[max(range(len(options)), key=lambda i: scores[i])]
+
+    def pointer_copy(self, prompt_ids: list[int]) -> str | None:
+        """Ask the trained pointer head for a span of the prompt to copy.
+
+        Token-level start/end prediction, so sub-word boundaries are reachable —
+        the failure that sank word-span copying. Returns None unless the head is
+        confident on BOTH endpoints, so uncertain cases fall back to generation
+        (datetimes and other transformed values must not be copied).
+        """
+        if not hasattr(self.model, "ptr_start"):
+            return None
+        hidden = self.hidden()
+        plen = len(prompt_ids)
+        with torch.no_grad():
+            s_log, e_log = self.model.pointer_scores(hidden, len(self.ids) - 1, plen)
+        s_p, e_p = torch.softmax(s_log.float(), -1), torch.softmax(e_log.float(), -1)
+        si, ei = int(s_p.argmax()), int(e_p.argmax())
+        if ei < si or ei - si > 40:
+            return None
+        if float(s_p[si]) < PTR_GATE or float(e_p[ei]) < PTR_GATE:
+            return None
+        return "".join(self.tok.token_str(t) for t in prompt_ids[si : ei + 1])
 
     def copy_span_value(self, query: str, max_words: int = 8, hint: str = "",
                         top_k: int = 24) -> str | None:
@@ -320,6 +343,7 @@ def constrained_decode(
     name_spans: dict[str, tuple[int, int]] | None = None,
     gated: bool = True,
     copy_spans: bool = False,  # measured WORSE — see note on copy_span_value
+    use_pointer: bool = True,
 ) -> list[dict[str, Any]]:
     """Decode a canonical call array under the grammar. Returns parsed calls.
 
@@ -332,6 +356,7 @@ def constrained_decode(
     if k <= 0:
         k = len(tools) if len(tools) <= 8 else 8
     dec = _Decoder(model, tok, device)
+    prompt_ids = tok.encode(prompt)
     dec.feed_id(BOS)  # sequences start with BOS in training; match it here
     dec.feed_str(prompt)
     dec.feed_str("[")
@@ -447,8 +472,12 @@ def constrained_decode(
             else:
                 dec.feed_str('"')
                 shape = _value_template(key, spec)
+                ptr = dec.pointer_copy(prompt_ids) if (use_pointer and prompt_ids) else None
                 if shape:
                     val = dec.gen_templated(shape)
+                elif ptr is not None:
+                    dec.feed_str(ptr)
+                    val = ptr
                 elif copy_spans:
                     span = dec.copy_span_value(
                         query, hint=f"{key} {spec.get('description','')}")
