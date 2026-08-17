@@ -123,3 +123,48 @@ holding multi-call at exactly zero. It is now correct on 69% of rows.
 A three-call row passes only if all three names *and* all three argument sets
 match. At ~70% per-call name accuracy that compounds to 34% at the sequence
 level before arguments are even considered. Per-call accuracy is the frontier.
+
+---
+
+# Benchmark notes worth recording (2026-08-17)
+
+## DroidCall's test split cannot be reproduced by anyone
+
+`scripts/split_data.py` in the DroidCall repository shuffles the instruction pool
+with `random.shuffle()` and **no seed**, then takes the first 200 rows as test.
+The split therefore differs on every invocation. Needle 2's reported 17.0% is
+measured on one such draw, and no third party — including Cactus themselves on a
+re-run — can regenerate those exact rows.
+
+Consequences we accept rather than paper over:
+- We created our own seeded split (`data/eval/droidcall_test_ours.jsonl`, seed
+  20260817) with the matching 9,851-row train file that excludes it.
+- The models trained tonight saw the **full** pool, so they cannot be scored on
+  DroidCall at all. No number is reported.
+- Any future DroidCall comparison is "same methodology, different rows", and
+  must be labelled that way.
+
+## Seal-Tools scores its own paper differently than Needle does
+
+The Seal-Tools paper reports Format ACC, Tool P/R/F1 and Parameter P/R/F1 — not
+ordered strict exact match. Their finetuned LLaMA2-7B reaches Tool F1 80.25 and
+Parameter F1 72.98, which is not comparable to Needle's "32.6 accuracy". Needle
+re-scored the suite under their own strict metric; we follow Needle's metric so
+our comparison against them is apples-to-apples, and we do not compare against
+the numbers printed in the Seal-Tools paper.
+
+Their error analysis is directly useful, though: of parameter-filling failures,
+**70% are keyword-extraction failures from the query** — pulling the wrong span,
+not misunderstanding the task. That is the same failure our own diagnostic found
+and motivates copying argument values rather than generating them.
+
+## Independent corroboration for span-copying
+
+- Seal-Tools paper: 70% of parameter errors are extraction failures.
+- LocalAgent (a 28M from-scratch tool-caller): "arg values must be copied, not
+  generated"; uses a learned pointer/copy head, reports ~83% held-out.
+- FuncBenchGen (arXiv 2509.26553): models "propagate incorrect or stale argument
+  values"; restating known values lifted GPT-5 from 62.5% to 81.3%.
+
+Measured on our own data: 90% of Seal-Tools argument values and 82% of Mobile
+Actions values appear verbatim in the query.
