@@ -49,11 +49,19 @@ def _train_rows() -> list[dict]:
         extra = _read_rows(teacher)
         counts["teacher"] = len(extra)
         rows += extra
-    official = DATA / "seeds" / "official_train.jsonl"
-    if official.exists():
-        extra = _read_rows(official)
-        counts["official_x3"] = len(extra) * 3
-        rows += extra * 3
+    # public benchmark TRAIN splits, repeated: they are the scarcest and most
+    # valuable signal we have, and each one is the same distribution as an eval
+    # suite we are measured on (train/eval firewall verified at conversion time)
+    for name, fname, rep in (("mobile_actions_x3", "official_train.jsonl", 3),
+                             ("seal_tools_x3", "seal_train.jsonl", 3),
+                             ("droidcall_x3", "droidcall_train.jsonl", 3),
+                             ("xlam", "xlam.jsonl", 1),
+                             ("toolace_x2", "toolace.jsonl", 2)):
+        f = DATA / "seeds" / fname
+        if f.exists():
+            extra = _read_rows(f)
+            counts[name] = len(extra) * rep
+            rows += extra * rep
     print("mix:", counts)
     return _augment(rows)
 
