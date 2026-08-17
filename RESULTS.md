@@ -305,3 +305,32 @@ The lesson for evaluation practice is sharper than the result: measuring the
 ablation on our strongest suite would have led us to delete a component worth
 +39% relative on the suite we were failing. In-distribution ablations can be
 blind to the exact contribution that matters.
+
+## Second negative result: a learned pointer/copy head
+
+After word-span copying failed, we trained a proper pointer head — token-level
+start/end prediction over the prompt, 0.40M parameters, trunk frozen, supervision
+derived from ~50k arguments whose gold value appears as a contiguous token
+subsequence of the prompt. It shipped behind a two-endpoint confidence gate.
+
+| Seal-Tools (multi-call weighted, 150 rows) | accuracy | 1-call | 2+-call |
+|---|---|---|---|
+| free generation | **25.3** | 56.7 | 4.4 |
+| pointer head on | 9.3 | 23.3 | 0.0 |
+
+Sixteen points worse, name accuracy unchanged (76.0 → 74.7) — the entire loss is
+in the arguments the head was built to fix.
+
+The head does learn: roughly half of training samples hit both endpoints exactly.
+The problem is calibration — its confidence does not track its correctness, so a
+0.55 two-endpoint gate still admits wrong spans, and a wrong span is a guaranteed
+row failure where free generation would often have produced the right value.
+
+**Both copy mechanisms failed.** "Copy, don't generate" is well supported in the
+literature (Seal-Tools' own error analysis, LocalAgent's pointer head,
+FuncBenchGen) and did not transfer here. The likely reason: grammar-constrained
+free generation is already a strong copier at ~47% per-call argument accuracy,
+and both mechanisms we built are noisier than that floor. A better-calibrated
+head — batched training, confidence calibrated on a held-out split, span-level
+rather than independent-endpoint scoring — may still beat it. Ours did not, and
+we report that rather than tuning until it did.
