@@ -24,6 +24,8 @@ from tiny_toolcall.schema import canon_calls
 API = "https://openrouter.ai/api/v1/chat/completions"
 VOLUME_MODEL = "deepseek/deepseek-v4-flash"
 
+CHAIN_MIX = [20, 22, 34, 14, 10]  # round 3: chain-weighted
+
 NAMING = [
     "snake_case (set_lights)", "camelCase (setLights)", "PascalCase (SetLights)",
     "dot.notation (lights.set)", "camelCase with a get/search/create verb prefix",
@@ -75,7 +77,10 @@ Rules:
   EXACT naming convention requested, 0-4 parameters each, some optional. Include
   1-2 tools NOT needed by the query as distractors. Optionally use an enum for one
   parameter. Some tools may legitimately take zero parameters.
-- query: natural user phrasing in the requested style. Vary vocabulary.
+- query: natural user phrasing in the requested style. Vary vocabulary. For
+  multi-call templates the query must genuinely require every call — a compound
+  request, a sequence, or several facts asked at once. Terse instruction phrasing
+  ("Retrieve X and Y and report Z") is as valid as conversational phrasing.
 - answers: the exact calls the query asks for, in order. [] if the query is
   off-topic for every tool (template=refuse) — for refuse, still invent tools
   but make the query about something none of them can do.
@@ -106,7 +111,7 @@ def _validate(ex: dict, tools_by_name: dict[str, dict], template: str) -> str | 
         return None if answers == [] else "refuse template must have answers=[]"
     if not answers:
         return "empty answers for non-refuse template"
-    want = {"one": 1, "two": 2, "three": 3}.get(template)
+    want = {"one": 1, "two": 2, "three": 3, "four": 4}.get(template)
     if want and len(answers) != want:
         return f"template {template} needs {want} calls, got {len(answers)}"
     q = ex["query"].lower()
@@ -202,7 +207,8 @@ async def _one_trace(
     model: str,
     seen: set[str],
 ) -> dict | None:
-    template = rng.choices(["one", "two", "three", "refuse"], weights=[45, 30, 10, 15])[0]
+    template = rng.choices(["one", "two", "three", "four", "refuse"],
+                           weights=CHAIN_MIX)[0]
     style = rng.choice(STYLES)
     invent = rng.random() < 0.7  # 30% stays on the device-control anchor catalog
     if invent:
