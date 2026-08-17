@@ -282,15 +282,26 @@ Seal-Tools prompts and 29,650 rows recovered from the length budget.
 (Mobile Actions), 76.4 vs 64.9 (Seal in-domain), 62.1 vs 58.7 (Seal OOD). Every
 remaining deficit is argument precision, not tool choice.
 
-## The name head does not earn its parameters
+## The name head passes its kill criterion — but only off-distribution
 
-Mobile Actions scores **82.6 identically** ungated, gated, and heads-off — three
-decimal places apart on none of them. The factorized name head, the readout fix
-motivated by "Looking Is Not Picking", contributes nothing once the trunk is
-trained on sufficient data. Its only positive result all session was +2.2 points
-on a 400-row OOD split at an earlier checkpoint.
+An earlier draft of this section concluded the opposite, on Mobile Actions
+evidence alone. The Seal-Tools ablations reverse it.
 
-Per the plan's own kill criterion — "if the factorized heads do not beat a
-same-trunk JSON-emission ablation, we drop the heads and keep the trunk" — it
-should be removed. That is a negative result about our own headline architectural
-idea, and it makes the model simpler rather than worse.
+| Suite | heads on | heads off | head contributes |
+|---|---|---|---|
+| Mobile Actions (961) | 82.6 / name 99.3 | 82.6 / name 99.3 | nothing |
+| Seal-Tools in (700) | **19.7** / name 76.1 | 17.1 / name 55.6 | +2.6 acc, **+20.5 name** |
+| Seal-Tools out (654) | **14.2** / name 62.2 | 10.2 / name 38.8 | +4.0 acc, **+23.4 name** |
+
+On the out-of-domain split the head is worth a **39% relative** improvement in
+exact match. On Mobile Actions it is worth exactly nothing.
+
+This is what "Looking Is Not Picking" predicts: the readout fix helps where the
+model is *uncertain*. On Mobile Actions the trunk already reaches 99.3% name
+accuracy and there is no headroom for a readout to recover; on unfamiliar API
+catalogs there is 20+ points of it.
+
+The lesson for evaluation practice is sharper than the result: measuring the
+ablation on our strongest suite would have led us to delete a component worth
++39% relative on the suite we were failing. In-distribution ablations can be
+blind to the exact contribution that matters.
