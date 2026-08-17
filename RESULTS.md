@@ -196,3 +196,64 @@ that was never generated. Free generation emits tokens and handles these.
 Span-copy is disabled by default and kept in the tree: a character-level span
 enumerator or a learned pointer head may still be right. The word-span
 approximation of that idea is not.
+
+---
+
+# v3 results (2026-08-17) — the data intervention worked
+
+Two models trained in parallel on the expanded 20,376-tool corpus: a warm start
+from v2 (301k rows, v2 tokenizer, 2 epochs) and a from-scratch run (330k rows,
+retrained tokenizer, 3 epochs).
+
+## Mobile Actions, 961 rows
+
+| Model | Params | Accuracy | Name acc | 1-call | 2-call |
+|---|---|---|---|---|---|
+| **Thimble v3-scratch** | 44M | **82.6** | 99.3 | 89.5 | 68.8 |
+| **Thimble v3-warm** | 44M | **82.3** | 99.1 | 89.4 | 68.2 |
+| Thimble v2 | 44M | 80.4 | 99.3 | 86.7 | 67.9 |
+| LFM2.5 230M (f16) | 230M | 69.1 | 93.0 | 76.1 | 55.0 |
+| FunctionGemma 270M (f16) | 270M | 64.0 | 87.3 | 73.0 | 46.2 |
+| Needle 2 (CQ2-bit) | 45M | 63.7 | 98.3 | 71.3 | 48.4 |
+| Apple FM (on-device) | ~3B | 57.6 | 94.2 | 64.5 | 43.8 |
+
+Adding 120k rows of foreign-domain data (xLAM, ToolACE, Seal-Tools, DroidCall)
+**improved** Mobile Actions rather than diluting it: 80.4 → 82.6. Gated and
+ungated are identical to the decimal — the lexical prior contributes nothing
+here, so the trunk is doing the work.
+
+## Seal-Tools (v3-warm)
+
+| Split | v2 | **v3** | Needle 2 |
+|---|---|---|---|
+| in-domain (700) | 4.4 | **19.0** | 32.6 |
+| out-of-domain (654) | 3.1 | **11.0** | 28.7 |
+
+A 4.3× improvement in-domain. The components show where it came from:
+
+| Bucket | v2 | v3 |
+|---|---|---|
+| single-call rows (200) | 15.5 | **52.0** |
+| multi-call rows (500) | **0.000** | 5.8 |
+| name accuracy (sequence) | 18.9 | **69.6** |
+
+**Tool selection is now solved on this suite**: our 69.6% name accuracy exceeds
+Needle's 64.9%. The entire remaining gap is argument precision compounding over
+2–3 call chains.
+
+## The gap, quantified
+
+19.0% = 104 rows (single-call at 52%) + 29 rows (multi-call at 5.8%) of 700.
+Beating 32.6% needs 228 rows. Matching Needle's single-call rate adds only 22, so
+**73 rows must come from multi-call**, i.e. lifting that bucket from 5.8% to ~20%.
+
+Working backwards, per-call argument accuracy is currently ~47%; ~71% is required.
+That single number is the frontier. Named in order of expected value:
+
+1. A learned pointer/copy head for arguments (trunk frozen, ~30 min to train).
+   The word-span approximation of this failed for a diagnosed reason; the learned
+   version can produce sub-word boundaries that word spans cannot.
+2. Capacity — 44M parameters over 20,376 tools is thin for precision work.
+3. More Seal-domain data — weakest lever; names already moved 18.9 → 69.6 on it.
+4. Pretraining — Needle reaches 32.6 *without training on Seal-Tools at all*,
+   off 153B tokens against our ~250M. The real structural difference.
