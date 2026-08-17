@@ -133,6 +133,49 @@ class _Decoder:
         scores = self.score_str(options)
         return options[max(range(len(options)), key=lambda i: scores[i])]
 
+    def copy_span_value(self, query: str, max_words: int = 8, hint: str = "",
+                        top_k: int = 24) -> str | None:
+        """Score candidate spans of the query and copy the best one verbatim.
+
+        90% of gold argument values in Seal-Tools (82% in Mobile Actions) appear
+        verbatim in the query, and Seal-Tools' own paper attributes 70% of
+        parameter errors to keyword-extraction failures. Free token-by-token
+        generation of a value that exists in the prompt is the wrong mechanism:
+        it is what produced truncation, degenerate loops and partial copies.
+        Returns None when no span is clearly preferred, so the caller can fall
+        back to free generation (datetimes, unit conversions, derived values).
+        """
+        words = query.split()
+        if not words or len(words) > 120:
+            return None
+        cands: list[str] = []
+        seen = set()
+        for i in range(len(words)):
+            for n in range(1, min(max_words, len(words) - i) + 1):
+                sp = " ".join(words[i : i + n]).strip(".,;:!?\"'()[]")
+                if sp and sp not in seen:
+                    seen.add(sp)
+                    cands.append(sp)
+        if not cands:
+            return None
+        # Model-scoring every span costs a rollout each and dominates decode
+        # time. Pre-rank cheaply by relevance to the parameter (its name and
+        # description) plus a mild shortness prior, then score only the top-k.
+        if len(cands) > top_k:
+            from tiny_toolcall.retrieve import _tok
+
+            hint_w = _tok(hint) if hint else set()
+            def prior(sp: str) -> float:
+                w = _tok(sp)
+                return len(w & hint_w) * 2.0 - 0.15 * len(sp.split())
+            cands = sorted(cands, key=prior, reverse=True)[:top_k]
+        scores = self.score_str(cands)
+        order = sorted(range(len(cands)), key=lambda i: scores[i], reverse=True)
+        best, second = order[0], order[1] if len(order) > 1 else order[0]
+        if scores[best] - scores[second] < 1e-9 and best != second:
+            return None
+        return cands[best]
+
     def gen_string_value(self, closing: str = '"') -> str:
         """Free-generate a string value until the closing quote token. String
         values legitimately contain structural chars (datetimes have ':'), so
@@ -263,6 +306,7 @@ def constrained_decode(
     use_name_head: bool = True,
     name_spans: dict[str, tuple[int, int]] | None = None,
     gated: bool = True,
+    copy_spans: bool = True,
 ) -> list[dict[str, Any]]:
     """Decode a canonical call array under the grammar. Returns parsed calls.
 
@@ -390,7 +434,18 @@ def constrained_decode(
             else:
                 dec.feed_str('"')
                 shape = _value_template(key, spec)
-                val = dec.gen_templated(shape) if shape else dec.gen_string_value()
+                if shape:
+                    val = dec.gen_templated(shape)
+                elif copy_spans:
+                    span = dec.copy_span_value(
+                        query, hint=f"{key} {spec.get('description','')}")
+                    if span is not None:
+                        dec.feed_str(span)
+                        val = span
+                    else:
+                        val = dec.gen_string_value()
+                else:
+                    val = dec.gen_string_value()
                 dec.feed_str('"')
                 args[key] = val
         dec.feed_str("}}")
