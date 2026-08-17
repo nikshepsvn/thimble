@@ -126,6 +126,11 @@ class ToolTransformer(nn.Module):
         self.blocks = nn.ModuleList(Block(cfg) for _ in range(cfg.n_layers))
         self.norm = RMSNorm(cfg.d_model)
         self.name_head = nn.Linear(cfg.d_model, cfg.d_model, bias=False)
+        # pointer/copy head: score every prompt position as the start and end of
+        # the span to copy for an argument value. Token-level, so sub-word
+        # boundaries are reachable — the failure mode that sank word-span copying.
+        self.ptr_start = nn.Linear(cfg.d_model, cfg.d_model, bias=False)
+        self.ptr_end = nn.Linear(cfg.d_model, cfg.d_model, bias=False)
         self.register_buffer("inv_freq", _inv_freq(cfg), persistent=False)
 
     def rope(self, t: int, device: torch.device, dtype: torch.dtype, offset: int = 0) -> tuple[torch.Tensor, torch.Tensor]:
@@ -169,6 +174,18 @@ class ToolTransformer(nn.Module):
         dec = self.name_head(h[decision_pos])
         segs = torch.stack([h[s:e].mean(dim=0) for s, e in cand_spans])
         return segs @ dec
+
+    def pointer_scores(
+        self, hidden: torch.Tensor, decision_pos: int, prompt_len: int, batch: int = 0
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """(start_logits, end_logits) over prompt positions [1, prompt_len].
+
+        hidden: (B, T, D) from forward(). Position 0 is BOS and is excluded.
+        """
+        h = hidden[batch]
+        ctx = h[decision_pos]
+        prompt = h[1 : prompt_len + 1]
+        return prompt @ self.ptr_start(ctx), prompt @ self.ptr_end(ctx)
 
     def count_params(self) -> int:
         return sum(p.numel() for p in self.parameters())
