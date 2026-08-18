@@ -58,10 +58,14 @@ for v in vals:
         mismatch += 1
 check("context-invariant value segmentation", mismatch == 0, f"{mismatch}/{len(vals)} mismatched")
 
-# 4: fragmentation vs the 8k baseline's measured 3.05 tokens/word
-frag = [len(tok.encode(v)) / max(1, len(v.split())) for v in vals]
+# 4: fragmentation on WORD values only — digit values lengthen BY DESIGN
+# (singletons), so averaging them in punishes the intended fix. 8k baseline
+# on word values: 2.72 tokens/word.
+word_vals = [v for v in vals if not any(c.isdigit() for c in v)]
+frag = [len(tok.encode(v)) / max(1, len(v.split())) for v in word_vals]
 mean_frag = sum(frag) / max(1, len(frag))
-check("fragmentation improved", mean_frag < 3.05, f"{mean_frag:.2f} tokens/word (8k baseline: 3.05)")
+check("word fragmentation improved", mean_frag < 2.72,
+      f"{mean_frag:.2f} tokens/word on {len(word_vals)} word values (8k baseline: 2.72)")
 
 # 5: round trip on eval queries + values
 rt_bad = 0
