@@ -24,7 +24,18 @@ from tiny_toolcall.schema import canon_calls
 API = "https://openrouter.ai/api/v1/chat/completions"
 VOLUME_MODEL = "deepseek/deepseek-v4-flash"
 
-CHAIN_MIX = [20, 22, 34, 14, 10]  # round 3: chain-weighted
+# Round 4 targets the two measured failures: the conjunction (row accuracy is
+# P(names) x p^n, and Seal-Tools is 56% three-call while our corpus was 5%) and
+# small-catalog refusal (every one of the ~10,700 refusal rows we had offered 3+
+# tools, so `irrelevance` scored exactly 0.0 -- the model had never seen "one
+# tool, it does not fit, say no").
+# Matched to Seal-Tools' actual shape (28.6% one, 56.3% three, 12.7% four)
+# rather than pushed as far into long chains as possible: a 25-row dry run at
+# four=22/five=8 produced padded answers — calls with no arguments and no
+# motivation in the query, emitted only to reach the requested count. Teaching
+# that would deepen the over-calling we already have. Refusals are held high
+# because half of them now carry 1-2 tool catalogs, the case with zero coverage.
+CHAIN_MIX = [12, 14, 38, 16, 4, 16]  # one / two / three / four / five / refuse
 
 NAMING = [
     "snake_case (set_lights)", "camelCase (setLights)", "PascalCase (SetLights)",
@@ -73,10 +84,11 @@ Produce ONE example as strict JSON. When asked to invent tools, output:
  "query": "...", "answers": [{"name": "...", "arguments": {...}}, ...]}
 When tools are provided, output only {"query": ..., "answers": ...}.
 Rules:
-- tools (when inventing): 3-8 plausible tools for the given domain, named in the
-  EXACT naming convention requested, 0-4 parameters each, some optional. Include
-  1-2 tools NOT needed by the query as distractors. Optionally use an enum for one
-  parameter. Some tools may legitimately take zero parameters.
+- tools (when inventing): output EXACTLY n_tools plausible tools for the given
+  domain, named in the EXACT naming convention requested, 0-4 parameters each,
+  some optional. When n_tools >= 4, include 1-2 tools NOT needed by the query as
+  distractors. Optionally use an enum for one parameter. Some tools may
+  legitimately take zero parameters.
 - query: natural user phrasing in the requested style. Vary vocabulary. For
   multi-call templates the query must genuinely require every call — a compound
   request, a sequence, or several facts asked at once. Terse instruction phrasing
@@ -111,7 +123,7 @@ def _validate(ex: dict, tools_by_name: dict[str, dict], template: str) -> str | 
         return None if answers == [] else "refuse template must have answers=[]"
     if not answers:
         return "empty answers for non-refuse template"
-    want = {"one": 1, "two": 2, "three": 3, "four": 4}.get(template)
+    want = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}.get(template)
     if want and len(answers) != want:
         return f"template {template} needs {want} calls, got {len(answers)}"
     q = ex["query"].lower()
@@ -207,7 +219,7 @@ async def _one_trace(
     model: str,
     seen: set[str],
 ) -> dict | None:
-    template = rng.choices(["one", "two", "three", "four", "refuse"],
+    template = rng.choices(["one", "two", "three", "four", "five", "refuse"],
                            weights=CHAIN_MIX)[0]
     style = rng.choice(STYLES)
     invent = rng.random() < 0.7  # 30% stays on the device-control anchor catalog
@@ -217,14 +229,21 @@ async def _one_trace(
         # which is why the model failed on camelCase benchmarks
         domain = rng.choice(WIDE_DOMAINS if rng.random() < 0.6 else DOMAINS)
         naming = rng.choice(NAMING)
+        # a refusal is only hard to learn when the catalog is small: with 8 tools
+        # on offer "none of these fit" is nearly implied by the odds
+        n_want = rng.randint(1, 2) if (template == "refuse" and rng.random() < 0.5) else rng.randint(4, 6)
+        numeric = rng.random() < 0.35
         user = (
             f"template={template}\nstyle={style}\ndomain={domain}\nnaming={naming}\n"
-            "Invent tools for this domain using that naming convention, then generate one example now."
+            f"n_tools={n_want}\n"
+            + ("At least two parameters across the catalog must be integer or number typed, "
+               "and the query must state those values as digits.\n" if numeric else "")
+            + "Invent tools for this domain using that naming convention, then generate one example now."
         )
         schemas: list[dict] = []
         tools_by_name: dict[str, dict] = {}
     else:
-        n_tools = rng.randint(3, 8)
+        n_tools = rng.randint(1, 2) if template == "refuse" and rng.random() < 0.5 else rng.randint(3, 8)
         tools = rng.sample(TRAIN, min(n_tools, len(TRAIN)))
         schemas = [tool_schema(t) for t in tools]
         tools_by_name = {s["name"]: s for s in schemas}
