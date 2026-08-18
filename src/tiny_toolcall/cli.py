@@ -60,7 +60,18 @@ def _train_rows() -> list[dict]:
                              # typed-Python-signature dialect; 27% of its rows are
                              # parallel/multiple calls, the shape we score worst on
                              ("dria", "dria.jsonl", 1),
-                             ("hermes_x3", "hermes.jsonl", 3)):
+                             ("hermes_x3", "hermes.jsonl", 3),
+                             # v5 imports — post firewall + cross-source dedup.
+                             # dolci is the one genuine find of the bulk-import
+                             # round: 120,511 truly new rows. bitagent (44 unique
+                             # of 551k) and argilla-apigen (0 unique of 109k)
+                             # turned out to be re-hosts of corpora already in
+                             # the mix and are deliberately absent.
+                             ("dolci", "dolci.jsonl", 1),
+                             ("glaive_sg", "glaive_sg.jsonl", 1),
+                             ("hermes_reason", "hermes_reason.jsonl", 1),
+                             ("qwen_tc", "qwen_tc.jsonl", 1),
+                             ("fc_unfiltered", "fc_unfiltered.jsonl", 1)):
         f = DATA / "seeds" / fname
         if f.exists():
             extra = _read_rows(f)

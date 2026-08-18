@@ -1,0 +1,12 @@
+{
+ "rows": 120,
+ "greedy_row": 33,
+ "pool_row": 40,
+ "assembled_row": 47,
+ "calls": 277,
+ "greedy_call": 125,
+ "name_avail": 262,
+ "keyset_avail": 219,
+ "fields_avail": 202,
+ "assembled_call": 170
+}
