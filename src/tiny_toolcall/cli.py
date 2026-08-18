@@ -53,7 +53,14 @@ def _train_rows() -> list[dict]:
     # valuable signal we have, and each one is the same distribution as an eval
     # suite we are measured on (train/eval firewall verified at conversion time)
     for name, fname, rep in (("mobile_actions_x3", "official_train.jsonl", 3),
-                             ("seal_tools_x3", "seal_train.jsonl", 3),
+                             ("seal_tools_x6", "seal_train.jsonl", 6),
+                             # x6, up from x3: seal_train is a perfect distributional
+                             # twin of the eval set (69/99.8/35.1/13.6 vs 70/99.7/35.9/14.0
+                             # on 3+calls/camelCase/opt-inclusion/numerics) and at x3 it
+                             # was 5% of a mix whose other 95% teaches 62-95% optional
+                             # inclusion — the exact over-inclusion error that is 28.4%
+                             # of our per-call failures. The model was doing what the
+                             # aggregate taught it.
                              ("droidcall_x3", "droidcall_train_heldout.jsonl", 3),  # 200 rows held out for eval
                              ("xlam", "xlam.jsonl", 1),
                              ("toolace_x2", "toolace.jsonl", 2),
