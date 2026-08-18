@@ -54,9 +54,13 @@ def _train_rows() -> list[dict]:
     # suite we are measured on (train/eval firewall verified at conversion time)
     for name, fname, rep in (("mobile_actions_x3", "official_train.jsonl", 3),
                              ("seal_tools_x3", "seal_train.jsonl", 3),
-                             ("droidcall_x3", "droidcall_train.jsonl", 3),
+                             ("droidcall_x3", "droidcall_train_heldout.jsonl", 3),  # 200 rows held out for eval
                              ("xlam", "xlam.jsonl", 1),
-                             ("toolace_x2", "toolace.jsonl", 2)):
+                             ("toolace_x2", "toolace.jsonl", 2),
+                             # typed-Python-signature dialect; 27% of its rows are
+                             # parallel/multiple calls, the shape we score worst on
+                             ("dria", "dria.jsonl", 1),
+                             ("hermes_x3", "hermes.jsonl", 3)):
         f = DATA / "seeds" / fname
         if f.exists():
             extra = _read_rows(f)

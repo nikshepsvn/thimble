@@ -110,7 +110,14 @@ def _layer_a(load_dataset, token) -> None:
         ("Salesforce/xlam-function-calling-60k", None, "train", None, "xlam60k.jsonl"),
         ("Team-ACE/ToolACE", None, "train", None, "toolace.jsonl"),
         ("NousResearch/hermes-function-calling-v1", "func_calling", "train", None, "hermes_fc.jsonl"),
+        ("NousResearch/hermes-function-calling-v1", "func_calling_singleturn", "train", None, "hermes_single.jsonl"),
         ("Salesforce/APIGen-MT-5k", None, "train", None, "apigen_mt.jsonl"),
+        # single-pass catalogs we have no coverage of; each is a different
+        # schema dialect, which is the point — naming monoculture is what sank
+        # Seal-Tools the first time round
+        ("glaiveai/glaive-function-calling-v2", None, "train", None, "glaive_v2.jsonl"),
+        ("Nexusflow/NexusRaven_API_evaluation", None, "train", None, "nexus_raven.jsonl"),
+        ("driaforall/pythonic-function-calling", None, "train", None, "dria_pythonic.jsonl"),
     ]
     for repo, cfg, split, flt, out in jobs_raw:
         try:
