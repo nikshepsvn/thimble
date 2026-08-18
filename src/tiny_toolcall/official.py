@@ -36,8 +36,10 @@ def _clean_args(args: dict[str, Any] | None) -> dict[str, Any]:
     return {k: v for k, v in (args or {}).items() if v is not None}
 
 
-_PY_TYPE = {"str": "string", "int": "integer", "float": "number", "bool": "boolean",
-            "list": "array", "dict": "object"}
+_PY_TYPE = {"str": "string", "int": "integer", "float": "number", "bool": "boolean"}
+# `float` maps to "number" rather than a strict float because Seal's gold writes
+# whole-valued floats as ints (42 cases in-domain); "number" accepts both.
+# list/dict have no grammar branch, so they fall through to string as before.
 
 
 def seal_tools_rows(path: Path) -> list[dict[str, Any]]:
@@ -71,10 +73,16 @@ def seal_tools_rows(path: Path) -> list[dict[str, Any]]:
             for pname, spec in (api.get("parameters") or {}).items():
                 spec = spec or {}
                 props[pname] = {
-                    # Seal-Tools quotes every gold value, including numerics
-                    # ("1986"), so its declared int/float types contradict its own
-                    # answers. Follow the data, not the declaration.
-                    "type": "string",
+                    # An earlier revision forced every param to "string" on the
+                    # basis that Seal quotes its numerics. That was measured on a
+                    # prefix of a file sorted by difficulty, and it is wrong:
+                    # across the full in-domain set the declaration matches the
+                    # gold for 425 of 498 numeric params, while forcing string
+                    # makes all 498 unreachable — the grammar cannot emit an
+                    # unquoted 2021 for a param declared string. 35.6% of rows
+                    # carry at least one non-string gold, so the old rule capped
+                    # in-domain accuracy at 64.4% before decoding began.
+                    "type": _PY_TYPE.get(spec.get("type", "str"), "string"),
                     "description": spec.get("description", ""),
                 }
             tools.append({
