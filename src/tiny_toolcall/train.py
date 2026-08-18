@@ -104,6 +104,11 @@ def step_loss(
     ).view(tgt.shape)
     denom = w.sum().clamp(min=1.0)
     lm_loss = (ce * w).sum() / denom
+    # z-loss on supervised positions: Needle's recipe carries it as the logit
+    # stabilizer, and our 16k vocab doubles the room for logit drift
+    lse = torch.logsumexp(logits[:, :-1].float(), dim=-1)
+    z_loss = ((lse ** 2) * (w > 0)).sum() / denom * 1e-4
+    lm_loss = lm_loss + z_loss
 
     name_losses = []
     correct = total = 0
@@ -135,6 +140,9 @@ def train(
 ) -> dict[str, float]:
     if device is None:
         device = pick_device()
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
     model.to(device)
     model.train()
     weights = loss_weights_from_cfg(cfg.get("loss", {}), device)
@@ -154,10 +162,36 @@ def train(
 
     muon_p, adamw_p = split_params(model)
     opt_m = Muon(muon_p, lr=float(tr.get("lr_muon", 0.02)), weight_decay=float(tr.get("wd", 0.01)))
-    opt_a = torch.optim.AdamW(adamw_p, lr=float(tr.get("lr_adam", 3e-4)), weight_decay=float(tr.get("wd", 0.01)))
+    try:
+        opt_a = torch.optim.AdamW(adamw_p, lr=float(tr.get("lr_adam", 3e-4)),
+                                  weight_decay=float(tr.get("wd", 0.01)),
+                                  fused=(device.type == "cuda"))
+    except (RuntimeError, TypeError):
+        opt_a = torch.optim.AdamW(adamw_p, lr=float(tr.get("lr_adam", 3e-4)),
+                                  weight_decay=float(tr.get("wd", 0.01)))
+
+    # dev split: the LAST dev_rows of the packed order are held out entirely.
+    # Dev is train-mix-derived — it exists to pick checkpoints, never to tune on
+    # eval suites — and it is excluded before batching so no gradient sees it.
+    dev_rows = int(tr.get("dev_rows", 5000))
+    n_all = ids.shape[0]
+    dev_idx = np.arange(max(0, n_all - dev_rows), n_all)
+    keep = np.arange(0, max(0, n_all - dev_rows))
+    dev_ids, dev_tags = ids[dev_idx], tags[dev_idx]
+    dev_dec = [decisions[j] for j in dev_idx.tolist()]
+    ids, tags = ids[keep], tags[keep]
+    decisions = [decisions[j] for j in keep.tolist()]
+    print(f"dev split: {len(dev_idx)} rows held out, {len(keep)} train")
+
+    # EMA shadow (weight averaging is the best-supported free win in the 2026
+    # pretraining literature); dev picks between raw/EMA at the end
+    ema_beta = float(tr.get("ema_beta", 0.999))
+    ema = {k: v.detach().clone().float() for k, v in model.state_dict().items()
+           if v.dtype.is_floating_point}
 
     n = ids.shape[0]
     step = 0
+    best_dev = float("inf")
     stats: dict[str, float] = {}
     t0 = time.time()
     ids_t = torch.from_numpy(ids.astype(np.int64))
@@ -194,6 +228,9 @@ def train(
             for opt in (opt_m, opt_a):
                 opt.zero_grad(set_to_none=True)
             loss.backward()
+            # one pathological imported batch must not get to move the weights
+            # arbitrarily; 1.0 only engages on outliers
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             # warmup-stable-decay
             frac = step / steps_total
             mult = min(1.0, (step + 1) / warmup) * (1.0 if frac < 0.8 else max(0.05, (1 - frac) / 0.2))
@@ -202,6 +239,10 @@ def train(
                     g["lr"] = base * mult
             opt_m.step()
             opt_a.step()
+            with torch.no_grad():
+                msd = model.state_dict()
+                for k, v in ema.items():
+                    v.mul_(ema_beta).add_(msd[k].float(), alpha=1.0 - ema_beta)
             step += 1
             if step % log_every == 0:
                 tps = step * batch * seq_len / (time.time() - t0)
@@ -209,11 +250,58 @@ def train(
                     f"ep{ep} step{step}/{steps_total} loss={loss.item():.4f} lm={stats['lm']:.4f} "
                     f"name={stats['name']:.4f} name_acc={stats['name_acc']:.3f} tok/s={tps:,.0f}"
                 )
+            if step % 1000 == 0 and len(dev_idx):
+                dl = _dev_loss(model, dev_ids[:1500], dev_tags[:1500], dev_dec[:1500],
+                               weights, device)
+                marker = ""
+                if dl < best_dev:
+                    best_dev = dl
+                    if save_path:
+                        _save(model, save_path.with_name(save_path.stem + "_devbest.pt"))
+                    marker = "  <- new best"
+                print(f"  dev@{step}: {dl:.4f}{marker}")
             if save_path and step % 500 == 0:
                 _save(model, save_path)
     if save_path:
         _save(model, save_path)
+        # EMA candidate: swap in, save, evaluate, restore
+        raw_sd = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        ema_sd = dict(raw_sd)
+        for k, v in ema.items():
+            ema_sd[k] = v.to(raw_sd[k].dtype)
+        model.load_state_dict(ema_sd)
+        _save(model, save_path.with_name(save_path.stem + "_ema.pt"))
+        if len(dev_idx):
+            dl_ema = _dev_loss(model, dev_ids, dev_tags, dev_dec, weights, device)
+            model.load_state_dict(raw_sd)
+            dl_final = _dev_loss(model, dev_ids, dev_tags, dev_dec, weights, device)
+            print(f"SELECTION dev(full): final={dl_final:.4f} ema={dl_ema:.4f} "
+                  f"best_periodic={best_dev:.4f}")
+            stats["dev_final"], stats["dev_ema"] = dl_final, dl_ema
+        else:
+            model.load_state_dict(raw_sd)
     return stats
+
+
+@torch.no_grad()
+def _dev_loss(model, dev_ids, dev_tags, dev_dec, weights, device, rows_per=16) -> float:
+    was_training = model.training
+    model.eval()
+    tot = n = 0.0
+    ids_t = torch.from_numpy(dev_ids.astype(np.int64))
+    tags_t = torch.from_numpy(dev_tags.astype(np.int64))
+    real = (dev_ids != 0).sum(axis=1)
+    for s in range(0, len(dev_ids), rows_per):
+        sl = slice(s, s + rows_per)
+        blen = int(real[sl].max())
+        blen = min(dev_ids.shape[1], (blen + 63) // 64 * 64)
+        loss, _ = step_loss(model, ids_t[sl][:, :blen].to(device),
+                            tags_t[sl][:, :blen].to(device), dev_dec[sl], weights)
+        tot += loss.item() * (sl.stop - s if sl.stop <= len(dev_ids) else len(dev_ids) - s)
+        n += min(rows_per, len(dev_ids) - s)
+    if was_training:
+        model.train()
+    return tot / max(1.0, n)
 
 
 def _save(model: ToolTransformer, save_path: Path) -> None:

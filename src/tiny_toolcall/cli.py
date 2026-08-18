@@ -71,7 +71,8 @@ def _train_rows() -> list[dict]:
                              ("glaive_sg", "glaive_sg.jsonl", 1),
                              ("hermes_reason", "hermes_reason.jsonl", 1),
                              ("qwen_tc", "qwen_tc.jsonl", 1),
-                             ("fc_unfiltered", "fc_unfiltered.jsonl", 1)):
+                             ("fc_unfiltered", "fc_unfiltered.jsonl", 1),
+                             ("dria_steps", "dria_steps.jsonl", 1)):
         f = DATA / "seeds" / fname
         if f.exists():
             extra = _read_rows(f)
@@ -201,6 +202,13 @@ def cmd_train(args) -> None:
         cfg.setdefault("train", {})["epochs"] = args.epochs
     if getattr(args, "lr_scale", 1.0) != 1.0:
         cfg.setdefault("train", {})["lr_scale"] = args.lr_scale
+    # RFT-style forced-token down-weighting (SHAD/RFT, ACL Findings 2025): the
+    # grammar force-feeds structure and keys at decode, and they consume 46.4%
+    # of the weighted loss budget. The twin run sets both to 0.1.
+    if getattr(args, "w_structure", None) is not None:
+        cfg.setdefault("loss", {})["structure"] = args.w_structure
+    if getattr(args, "w_keys", None) is not None:
+        cfg.setdefault("loss", {})["keys"] = args.w_keys
     stats = train(model, ids, tags, dec, cfg, save_path=CKPT / f"{args.name}.pt")
     print("final:", stats)
 
@@ -332,6 +340,8 @@ def main() -> None:
     p.add_argument("--name", default="sft")
     p.add_argument("--init", default="", help="warm-start from this checkpoint name")
     p.add_argument("--lr-scale", type=float, default=1.0, help="scale LRs (use <1 when warm-starting)")
+    p.add_argument("--w-structure", type=float, default=None, help="loss weight override for forced structural tokens")
+    p.add_argument("--w-keys", type=float, default=None, help="loss weight override for forced key tokens")
     p.set_defaults(fn=cmd_train)
 
     p = sub.add_parser("eval")
