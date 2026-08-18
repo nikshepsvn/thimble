@@ -587,3 +587,46 @@ Those are safety and reliability properties, and they are worth having. But the
 honest statement is that the grammar makes the model's output *trustworthy*, not
 *correct*, and earlier framing in this document overstated its contribution to
 accuracy.
+
+---
+
+# v5 methodology (2026-08-18, overnight) — recorded before the finals exist
+
+Written while both runs train, so the method is on record independent of the
+outcome. Corpus: 472,407 unique rows after the free-data campaign (dolci
++120,511 was the one genuine find; bitagent yielded 44 unique of 551k and
+argilla-apigen 0 of 109k — re-hosts), plus 71,277 targeted synth rows, minus
+5,561 synth rows our own 8-gram firewall flagged (2.16% — the import standard
+applied to ourselves). Packed: 645,323 rows at seq 768.
+
+Key mix decision from measurement: seal_train is a perfect distributional twin
+of the eval set (69.0/99.8/35.1/13.6 vs 70.0/99.7/35.9/14.0 on
+3+calls/camelCase/optional-inclusion/numeric-share) while the rest of the mix
+teaches 62-95% optional inclusion against Seal's 36% — the aggregate corpus was
+TEACHING our largest error class. seal_train x3 -> x6.
+
+Tokenizer: 16,384 vocab, digits never merge. Verification gate: word-value
+fragmentation 2.72 -> 2.34 tokens/word, digit values lengthen by design,
+'electrical engineering' 6 -> 3 tokens, mean prompt 195 -> 181, six checks
+passed. The gate initially BLOCKED on a mis-specified metric that averaged the
+intended digit expansion into word fragmentation; the gate was fixed, not the
+tokenizer, and the distinction is the point of having gates.
+
+Two runs, one variable: v5 (standard recipe) and v5rft (grammar-forced tokens
+at 0.1x — SHAD/RFT-style; forced tokens measured at 46.4% of the weighted loss
+budget). Mid-training probes at step ~21k and ~28k of 64,704 (both pre-decay):
+v5 seal-in 18.7 -> 20.0, MA 61.3 -> 67.3, rising on every metric; v5rft trails
+its sibling on MA (-19) and seal name-sequence (-19) at matched steps while
+slightly leading on seal exact — early evidence that structural tokens carry
+call-SEQUENCING signal, a mechanism the RFT paper's setting would not surface.
+
+Model: 48.12M params (16k-vocab tied embeddings add 3.67M over v4's 44.45M;
+Needle 2 is 45.0M; at their own 2-bit deployment standard v5 would be 11.5MB
+against their 14MB). Reported as parameter-class-matched with exact counts.
+
+Pre-registered selection rule: champion by canonical-weights dev loss ONLY
+(scripts/select_champion.py re-scores all candidates — final/devbest/EMA/soup
+x both runs — under one weight config; the twin's own dev scale differs by
+construction). Per-candidate eval probes are recorded but never select.
+Reserve lever: scripts/mrt_finetune.py (RLOO, partial-credit reward,
+leave-one-out baseline, gold-CE alpha=0.3) fires only in the 29-32.5 band.
