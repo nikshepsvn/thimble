@@ -17,3 +17,7 @@ checkpoints/
 status.md
 data/seeds/
 data/tokenizer.json
+bfcl_*.json
+diag_*.json
+draft_vs_con_*.json
+final_*.json

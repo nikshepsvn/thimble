@@ -168,11 +168,11 @@ svg{display:block;max-width:100%;height:auto}
 
 <div class="col">
   <div class="band">
-    <div class="stat"><span class="k">Mobile Actions</span><span class="v hi">80.1</span>
+    <div class="stat"><span class="k">Mobile Actions</span><span class="v hi">82.6</span>
       <span class="sub">Needle 2 — 63.7</span></div>
-    <div class="stat"><span class="k">vs Apple FM ~3B</span><span class="v">+22.5</span>
+    <div class="stat"><span class="k">vs Apple FM ~3B</span><span class="v">+25.0</span>
       <span class="sub">at 68× fewer params</span></div>
-    <div class="stat"><span class="k">Two-call rows</span><span class="v hi">66.0</span>
+    <div class="stat"><span class="k">Two-call rows</span><span class="v hi">68.8</span>
       <span class="sub">Needle 2 — 48.4</span></div>
     <div class="stat"><span class="k">Well-formed</span><span class="v">100</span>
       <span class="sub">structural, not learned</span></div>
@@ -242,7 +242,7 @@ svg{display:block;max-width:100%;height:auto}
       <!-- connector emphasising same-size, 16-point gap -->
       <line x1="137" y1="68" x2="137" y2="161.7" stroke="var(--accent)" stroke-width="1"
         stroke-dasharray="3 3" opacity="0.65"/>
-      <text x="150" y="118" fill="var(--accent)" font-size="10">+16.4 at the same size</text>
+      <text x="150" y="118" fill="var(--accent)" font-size="10">+18.9 at the same size</text>
 
       <!-- points -->
       <g>
@@ -261,7 +261,7 @@ svg{display:block;max-width:100%;height:auto}
         <!-- Ours -->
         <circle cx="135.8" cy="68" r="9" fill="var(--accent)"/>
         <circle cx="135.8" cy="68" r="17" fill="none" stroke="var(--accent)" opacity="0.35"/>
-        <text x="163" y="64" fill="var(--accent)" font-size="13" font-weight="600">Thimble 44M · 80.1</text>
+        <text x="163" y="64" fill="var(--accent)" font-size="13" font-weight="600">Thimble 44M · 82.6</text>
       </g>
     </g>
   </svg>
@@ -489,7 +489,7 @@ svg{display:block;max-width:100%;height:auto}
       </thead>
       <tbody>
         <tr class="ours"><td class="model">Thimble <span class="dim">bf16</span></td><td>44M</td>
-          <td>80.1</td><td>99.5</td><td>100.0</td><td>87.2</td><td>66.0</td></tr>
+          <td>82.6</td><td>99.3</td><td>100.0</td><td>89.5</td><td>68.8</td></tr>
         <tr><td class="model">LFM2.5 <span class="dim">f16</span></td><td class="dim">230M</td>
           <td>69.1</td><td>93.0</td><td>98.9</td><td>76.1</td><td>55.0</td></tr>
         <tr><td class="model">FunctionGemma <span class="dim">f16</span></td><td class="dim">270M</td>
@@ -623,20 +623,20 @@ svg{display:block;max-width:100%;height:auto}
 <!-- ===== COST ===== -->
 <section class="col">
   <p class="eyebrow">The bill</p>
-  <h2>One working day, twenty-six dollars</h2>
+  <h2>One working day, sixty-eight dollars</h2>
   <figure class="plate" style="margin-top:var(--s3)">
     <div class="scroll">
     <table>
       <thead><tr><th>Item</th><th>Detail</th><th>Cost</th></tr></thead>
       <tbody>
         <tr><td class="model">Teacher traces</td>
-          <td class="dim">80,599 validated · DeepSeek V4 Flash</td><td>$25.11</td></tr>
+          <td class="dim">145,678 validated · DeepSeek V4 Flash</td><td>$60.30</td></tr>
         <tr><td class="model">Training</td>
-          <td class="dim">RTX 3090 · 8,397 steps · 3 epochs · 1 h</td><td>$0.25</td></tr>
+          <td class="dim">2× RTX 3090 · 4 training runs · ~9 h</td><td>$6.40</td></tr>
         <tr><td class="model">Evaluation</td>
-          <td class="dim">same GPU, suites in parallel</td><td>$0.60</td></tr>
+          <td class="dim">full suites, both models, all ablations</td><td>$1.80</td></tr>
         <tr class="ours"><td class="model">Total</td>
-          <td class="dim">146,439 packed rows · 3,335 distinct tools</td><td>$25.96</td></tr>
+          <td class="dim">330,484 packed rows · 20,376 distinct tools</td><td>$68.50</td></tr>
       </tbody>
     </table>
     </div>

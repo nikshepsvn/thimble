@@ -41,6 +41,7 @@ def main() -> None:
         "seal-tools-out": lambda: seal_tools_rows(ev / "seal_tools_out_domain.json"),
         "local-eval": lambda: [json.loads(l) for l in (ROOT/"data/seeds/local_eval.jsonl").read_text().splitlines() if l.strip()],
         "local-ood": lambda: [json.loads(l) for l in (ROOT/"data/seeds/local_ood.jsonl").read_text().splitlines() if l.strip()],
+        "droidcall": lambda: [json.loads(l) for l in (ROOT/"data/eval/droidcall_test_ours.jsonl").read_text().splitlines() if l.strip()],
     }[a.suite]()
     rows = [normalize_example(r) for r in (src[: a.limit] if a.limit else src)]
 
