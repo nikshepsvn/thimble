@@ -282,7 +282,21 @@ def cmd_overfit(args) -> None:
 
 
 def _read_rows(path: Path) -> list[dict]:
-    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    """Tolerant JSONL reader: a file being APPENDED to (teacher synth writes
+    while tok/pack read) always risks one partially-written trailing line.
+    This exact race corrupted teacher.jsonl once already; skip-and-count is the
+    correct behaviour, not crashing half an hour into a mix load."""
+    rows, bad = [], 0
+    for l in path.read_text().splitlines():
+        if not l.strip():
+            continue
+        try:
+            rows.append(json.loads(l))
+        except json.JSONDecodeError:
+            bad += 1
+    if bad:
+        print(f"  _read_rows: skipped {bad} undecodable line(s) in {path.name}")
+    return rows
 
 
 def _fmt(s: dict) -> str:

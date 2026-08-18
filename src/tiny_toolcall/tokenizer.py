@@ -117,9 +117,30 @@ def train_bpe(texts: list[str], vocab_size: int = 8192) -> BPETokenizer:
         for a, b in zip(w, w[1:]):
             pair_counts[(a, b)] += n
 
+    def _mergeable(a: str, b: str) -> bool:
+        """Digits never merge — with each other or with anything else.
+
+        BPE over our corpus produced '2021' as one token but '38.0' as
+        ['3','8.','0'] and '20.8' as ['20','.','8']: the same numeric structure
+        got arbitrarily different segmentations, and gold-vs-pred errors like
+        300 -> '30000' trace directly to it. Base-10 (digit singletons) is
+        consistently more data-efficient from scratch and the advantage does not
+        shrink with model size. A side effect pays for the token cost: the worst
+        template-leakage merges ('(speed=enum(0.5') all contained digits, so
+        this rule eliminates that class too. 77.3% of Seal and 70.8% of Mobile
+        Actions gold values carry a digit.
+        """
+        return not any(ch.isdigit() for ch in a + b)
+
     words = dict(freq)
     while len(vocab) < vocab_size and pair_counts:
-        (a, b), top = pair_counts.most_common(1)[0]
+        candidates = [(p, n) for p, n in pair_counts.most_common(50) if _mergeable(*p)]
+        if not candidates:
+            # everything frequent involves digits; scan the rest once
+            candidates = [(p, n) for p, n in pair_counts.most_common() if _mergeable(*p)]
+            if not candidates:
+                break
+        (a, b), top = candidates[0]
         if top < 2:
             break
         merged = a + b
