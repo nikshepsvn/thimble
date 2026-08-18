@@ -48,10 +48,13 @@ class _Decoder:
     are truncated back to a saved length, so candidate rollouts are free of
     recomputation and leave no trace)."""
 
-    def __init__(self, model, tok: BPETokenizer, device: torch.device):
+    def __init__(self, model, tok: BPETokenizer, device: torch.device, temp: float = 0.0):
         self.model = model
         self.tok = tok
         self.device = device
+        # temp > 0 turns every choice point into a sample instead of an argmax.
+        # Only pass@k measurement uses this; scored runs stay deterministic.
+        self.temp = temp
         self.ids: list[int] = []
         self.caches = model.new_caches()
         self.hiddens: list[torch.Tensor] = []  # (1, t_i, d) chunks, order = feed order
@@ -98,6 +101,13 @@ class _Decoder:
                 c["k"] = c["k"][:, :, :n_ids]
                 c["v"] = c["v"][:, :, :n_ids]
 
+    def pick(self, scores: torch.Tensor) -> int:
+        """argmax, or a temperature sample when measuring pass@k."""
+        if self.temp <= 0:
+            return int(scores.argmax().item())
+        p = torch.softmax(scores.float() / self.temp, dim=-1)
+        return int(torch.multinomial(p, 1).item())
+
     def choose_first(self, options: list[str]) -> str:
         """Branch decision by first-token logit only. Exact for structural
         branches, whose options always start with distinct singleton tokens
@@ -106,8 +116,7 @@ class _Decoder:
         logits = self.next_logits()
         lp = torch.log_softmax(logits.float(), dim=-1)
         first_ids = [self.tok.encode(o)[0] for o in options]
-        best = max(range(len(options)), key=lambda i: lp[first_ids[i]].item())
-        return options[best]
+        return options[self.pick(torch.tensor([lp[i] for i in first_ids]))]
 
     def score_first(self, options: list[str]) -> list[float]:
         """Per-option first-token logprob (branch decisions)."""
@@ -131,8 +140,7 @@ class _Decoder:
         return scores
 
     def choose_str(self, options: list[str]) -> str:
-        scores = self.score_str(options)
-        return options[max(range(len(options)), key=lambda i: scores[i])]
+        return options[self.pick(torch.tensor(self.score_str(options)))]
 
     def pointer_copy(self, prompt_ids: list[int]) -> str | None:
         """Ask the trained pointer head for a span of the prompt to copy.
@@ -245,7 +253,7 @@ class _Decoder:
             # ("the city in the city in..."), which fails exact match outright.
             # Ban any token that would complete a repeated trigram, and stop on a
             # repeated bigram — a copied value is never periodic.
-            nxt = int(masked.argmax().item())
+            nxt = self.pick(masked)
             if nxt == close_id:
                 break
             # Only PERIODIC repetition is degenerate. Natural prose repeats
@@ -358,33 +366,58 @@ def constrained_decode(
     gated: bool = True,
     copy_spans: bool = False,  # measured WORSE — see note on copy_span_value
     use_pointer: bool = False,  # measured 16 points WORSE — see pointer_copy
+    force_names: list[str] | None = None,  # DIAGNOSTIC ONLY — never on a scored run
+    max_calls: int = MAX_CALLS,
+    temp: float = 0.0,  # >0 samples every choice point (pass@k only)
 ) -> list[dict[str, Any]]:
     """Decode a canonical call array under the grammar. Returns parsed calls.
 
     name_spans: token [start,end) spans of each tool's name inside the prompt,
     needed for the name head; if absent (or use_name_head=False) the LM picks
     names by teacher-forced logprob (the heads-off ablation).
+
+    force_names pins the call sequence to a given list, bypassing both the
+    stop decision and the name choice. It exists so error analysis can attribute
+    a failure to naming/ordering versus argument filling; it must never be used
+    on a run whose number gets reported.
     """
+    # An empty catalog has exactly one correct answer and no decision to make.
+    # BFCL live_irrelevance carries 4 such rows and they crashed the name choice
+    # (argmax over zero candidates) rather than refusing, which is what an empty
+    # tool list means.
+    if not tools:
+        return []
     # retrieval narrows only genuinely large catalogs; small ones stay whole so
     # retrieval recall never caps name accuracy below what the head can do
     if k <= 0:
         k = len(tools) if len(tools) <= 8 else 8
-    dec = _Decoder(model, tok, device)
+    dec = _Decoder(model, tok, device, temp=temp)
     prompt_ids = tok.encode(prompt)
     dec.feed_id(BOS)  # sequences start with BOS in training; match it here
     dec.feed_str(prompt)
     dec.feed_str("[")
 
     emitted: list[dict[str, Any]] = []
-    for _ in range(MAX_CALLS):
+    budget = len(force_names) if force_names is not None else max_calls
+    for _ in range(budget):
         # choice 1 / 5: stop ( ] ) or (another) call ( { first, , later )
         open_opt = '{"name":"' if not emitted else ',{"name":"'
-        stop_lp = dec.score_first(["]", open_opt])
-        refuse = stop_lp[0] >= stop_lp[1]
+        if force_names is not None:
+            refuse = False
+        else:
+            stop_lp = dec.score_first(["]", open_opt])
+            refuse = dec.pick(torch.tensor(stop_lp)) == 0
         if refuse and gated and not emitted:
             # a confident refusal stands; a marginal one loses to clear evidence
             # that some tool in the catalog answers the query
-            lex = lexical_scores(query, tools)
+            # `peak` measures how far the prior is from uniform, i.e. how well it
+            # DISCRIMINATES between candidates. That quantity is undefined with a
+            # single candidate: lexical_scores normalises to sum 1.0, so one tool
+            # always scores 1.0 and always reads as maximally peaked — even at
+            # zero token overlap. The override therefore fired unconditionally on
+            # one-tool catalogs and the model could never refuse there, which is
+            # why BFCL irrelevance (mean 1.0 tools) scored exactly 0.0.
+            lex = lexical_scores(query, tools) if len(tools) > 1 else {}
             if lex:
                 peak = max(lex.values()) - 1.0 / max(2, len(lex))
                 margin = abs(stop_lp[0] - stop_lp[1])
@@ -400,6 +433,13 @@ def constrained_decode(
         # choice 2: name among refreshed candidates. heads-on ensembles the
         # trained readout (wins off-distribution) with the LM's teacher-forced
         # logprob (wins in-distribution); heads-off is the pure-LM ablation
+        if force_names is not None:
+            name = force_names[len(emitted)]
+            dec.feed_str(name)
+            tool = next(t for t in tools if t["name"] == name)
+            dec.feed_str('","arguments":{')
+            emitted.append(_fill_args(dec, tool, prompt_ids, query, copy_spans, use_pointer, name))
+            continue
         cands = retrieve(query, tools, k=k, emitted=emitted)
         cand_names = [t["name"] for t in cands]
         if use_name_head and name_spans and all(n in name_spans for n in cand_names):
@@ -427,85 +467,101 @@ def constrained_decode(
                 confidence = float(srt[0] - srt[1])
                 w = min(LEX_MAX_WEIGHT, max(0.0, peak * LEX_SHARPNESS)) * (1.0 - confidence)
                 probs = (1.0 - w) * probs + w * lp
-        name = cand_names[int(probs.argmax().item())]
+        name = cand_names[dec.pick(torch.log(probs.clamp_min(1e-9)))]
         dec.feed_str(name)
         tool = next(t for t in tools if t["name"] == name)
         dec.feed_str('","arguments":{')
 
-        # choices 3/4: keys forced in sorted order; optionals are include/skip
-        keys, required, props = _sorted_props(tool)
-        args: dict[str, Any] = {}
-        first = True
-        for ki, key in enumerate(keys):
-            spec = props.get(key, {})
-            sep = "" if first else ","
-            if key not in required:
-                # include this optional? the skip-path continuation is the NEXT
-                # key's opener (which also starts with `"`) or `}` — so the
-                # decision must be scored on content, not the first token
-                opener = f'{sep}"{key}":'
-                nxt_key = keys[ki + 1] if ki + 1 < len(keys) else None
-                skip = f'{sep}"{nxt_key}":' if nxt_key else "}"
-                pick = dec.choose_str([opener, skip])
-                if pick != opener:
-                    continue
-                dec.feed_str(opener)
-            else:
-                dec.feed_str(f'{sep}"{key}":')
-            first = False
-            typ = spec.get("type", "string")
-            enum = spec.get("enum")
-            if enum:
-                dec.feed_str('"')
-                val = dec.choose_str([str(e) for e in enum])
-                dec.feed_str(val + '"')
-                args[key] = val
-            elif typ == "boolean":
-                val = dec.choose_first(["true", "false"])
-                dec.feed_str(val)
-                args[key] = val == "true"
-            elif typ in ("integer", "number"):
-                s = dec.gen_number_value()
-                try:
-                    val = json.loads(s)
-                    if not isinstance(val, (int, float)):
-                        raise ValueError(s)
-                except (json.JSONDecodeError, ValueError):
-                    # generator can assemble char-valid but JSON-invalid strings
-                    # (e.g. "1-2", "3.4.5"); keep the longest valid numeric prefix
-                    val = 0
-                    for cut in range(len(s), 0, -1):
-                        try:
-                            cand = json.loads(s[:cut])
-                        except (json.JSONDecodeError, ValueError):
-                            continue
-                        if isinstance(cand, (int, float)):
-                            val = cand
-                            break
-                args[key] = int(val) if typ == "integer" and isinstance(val, float) else val
-            else:
-                dec.feed_str('"')
-                shape = _value_template(key, spec)
-                ptr = dec.pointer_copy(prompt_ids) if (use_pointer and prompt_ids) else None
-                if shape:
-                    val = dec.gen_templated(shape)
-                elif ptr is not None:
-                    dec.feed_str(ptr)
-                    val = ptr
-                elif copy_spans:
-                    span = dec.copy_span_value(
-                        query, hint=f"{key} {spec.get('description','')}")
-                    if span is not None:
-                        dec.feed_str(span)
-                        val = span
-                    else:
-                        val = dec.gen_string_value()
-                else:
-                    val = dec.gen_string_value()
-                dec.feed_str('"')
-                args[key] = val
-        dec.feed_str("}}")
-        emitted.append({"name": name, "arguments": args})
+        emitted.append(_fill_args(dec, tool, prompt_ids, query, copy_spans, use_pointer, name))
     else:
         dec.feed_str("]")
     return emitted
+
+
+def _fill_args(
+    dec: "_Decoder",
+    tool: dict[str, Any],
+    prompt_ids: list[int],
+    query: str,
+    copy_spans: bool,
+    use_pointer: bool,
+    name: str,
+) -> dict[str, Any]:
+    """Choices 3/4: keys forced in sorted order; optionals are include/skip.
+
+    The decoder is positioned just after `"arguments":{` and is left just after
+    the closing `}}` of the call.
+    """
+    keys, required, props = _sorted_props(tool)
+    args: dict[str, Any] = {}
+    first = True
+    for ki, key in enumerate(keys):
+        spec = props.get(key, {})
+        sep = "" if first else ","
+        if key not in required:
+            # include this optional? the skip-path continuation is the NEXT
+            # key's opener (which also starts with `"`) or `}` — so the
+            # decision must be scored on content, not the first token
+            opener = f'{sep}"{key}":'
+            nxt_key = keys[ki + 1] if ki + 1 < len(keys) else None
+            skip = f'{sep}"{nxt_key}":' if nxt_key else "}"
+            pick = dec.choose_str([opener, skip])
+            if pick != opener:
+                continue
+            dec.feed_str(opener)
+        else:
+            dec.feed_str(f'{sep}"{key}":')
+        first = False
+        typ = spec.get("type", "string")
+        enum = spec.get("enum")
+        if enum:
+            dec.feed_str('"')
+            val = dec.choose_str([str(e) for e in enum])
+            dec.feed_str(val + '"')
+            args[key] = val
+        elif typ == "boolean":
+            val = dec.choose_first(["true", "false"])
+            dec.feed_str(val)
+            args[key] = val == "true"
+        elif typ in ("integer", "number"):
+            s = dec.gen_number_value()
+            try:
+                val = json.loads(s)
+                if not isinstance(val, (int, float)):
+                    raise ValueError(s)
+            except (json.JSONDecodeError, ValueError):
+                # generator can assemble char-valid but JSON-invalid strings
+                # (e.g. "1-2", "3.4.5"); keep the longest valid numeric prefix
+                val = 0
+                for cut in range(len(s), 0, -1):
+                    try:
+                        cand = json.loads(s[:cut])
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if isinstance(cand, (int, float)):
+                        val = cand
+                        break
+            args[key] = int(val) if typ == "integer" and isinstance(val, float) else val
+        else:
+            dec.feed_str('"')
+            shape = _value_template(key, spec)
+            ptr = dec.pointer_copy(prompt_ids) if (use_pointer and prompt_ids) else None
+            if shape:
+                val = dec.gen_templated(shape)
+            elif ptr is not None:
+                dec.feed_str(ptr)
+                val = ptr
+            elif copy_spans:
+                span = dec.copy_span_value(
+                    query, hint=f"{key} {spec.get('description','')}")
+                if span is not None:
+                    dec.feed_str(span)
+                    val = span
+                else:
+                    val = dec.gen_string_value()
+            else:
+                val = dec.gen_string_value()
+            dec.feed_str('"')
+            args[key] = val
+    dec.feed_str("}}")
+    return {"name": name, "arguments": args}
