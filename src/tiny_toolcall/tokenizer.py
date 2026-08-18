@@ -113,9 +113,11 @@ def train_bpe(texts: list[str], vocab_size: int = 8192) -> BPETokenizer:
 
     merges: list[tuple[str, str]] = []
     pair_counts: Counter[tuple[str, str]] = Counter()
+    no_digit = lambda a, b: not any(ch.isdigit() for ch in a + b)
     for w, n in freq.items():
         for a, b in zip(w, w[1:]):
-            pair_counts[(a, b)] += n
+            if no_digit(a, b):
+                pair_counts[(a, b)] += n
 
     def _mergeable(a: str, b: str) -> bool:
         """Digits never merge — with each other or with anything else.
@@ -134,13 +136,12 @@ def train_bpe(texts: list[str], vocab_size: int = 8192) -> BPETokenizer:
 
     words = dict(freq)
     while len(vocab) < vocab_size and pair_counts:
-        candidates = [(p, n) for p, n in pair_counts.most_common(50) if _mergeable(*p)]
-        if not candidates:
-            # everything frequent involves digits; scan the rest once
-            candidates = [(p, n) for p, n in pair_counts.most_common() if _mergeable(*p)]
-            if not candidates:
-                break
-        (a, b), top = candidates[0]
+        # digit pairs are excluded at count time, so the head of the heap is
+        # always mergeable; guard retained as a correctness backstop
+        (a, b), top = pair_counts.most_common(1)[0]
+        if not _mergeable(a, b):
+            del pair_counts[(a, b)]
+            continue
         if top < 2:
             break
         merged = a + b

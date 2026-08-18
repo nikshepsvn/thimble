@@ -196,3 +196,4 @@ are still due rotation (exposed in an early transcript).
   data hypothesis is falsified at this scale, and the honest conclusion is
   that 44M + ~10 tokens/param is short of this suite.
 - BFCL is reported whatever it says; nothing in this plan tunes on it.
+45M-class disclosure: v5 is 48.12M params (16,384-vocab tied embeddings add 3.67M over v4's 44.45M). Needle 2 is 45.0M. At their own 2-bit deployment standard v5 is 11.5MB against their 14MB. Reported as parameter-class-matched with exact counts, never rounded down.
