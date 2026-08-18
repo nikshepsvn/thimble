@@ -334,3 +334,256 @@ and both mechanisms we built are noisier than that floor. A better-calibrated
 head — batched training, confidence calibrated on a held-out split, span-level
 rather than independent-endpoint scoring — may still beat it. Ours did not, and
 we report that rather than tuning until it did.
+
+---
+
+# v4 preparation (2026-08-18) — a schema bug, not a capability gap
+
+## The oracle ablation that redirected the whole effort
+
+Every Seal-Tools number up to here was a single scalar that could have been
+produced by very different failures. `scripts/seal_diag.py` decodes each row
+twice — once normally, once with the call sequence pinned to the gold names —
+so selection errors and argument errors separate:
+
+| | forced-string schema | declared-type schema |
+|---|---|---|
+| exact (as scored) | 22.5 | 22.5 |
+| name sequence correct | 76.0 | 78.0 |
+| **oracle names -> exact** | **25.5** | **26.5** |
+| oracle per-call argument exact | 44.3 | **51.8** |
+
+Perfect tool selection buys 3 points. **Tool selection is not the bottleneck on
+Seal-Tools and never was**; every remaining point is in argument values.
+
+## The bug
+
+`official.py` forced every Seal parameter to `type: "string"`, on the stated
+grounds that Seal quotes its numerics. That was measured on a prefix of a file
+that ships sorted by difficulty — the same sampling trap that produced the
+bogus 61% name-accuracy probe earlier in this project. Across the full
+in-domain set the declaration agrees with the gold far more often than not:
+
+| declared -> gold | count |
+|---|---|
+| int -> int | 223 |
+| float -> float | 202 |
+| int -> str | 42 |
+| float -> str | 31 |
+
+Forcing string made all 498 numeric parameters unreachable: the grammar
+force-feeds `"`, so the decoder could not emit a bare `2021` however well it was
+trained. 35.6% of in-domain rows carry at least one non-string gold value, so
+the rule capped accuracy at 64.4% before decoding began.
+
+It corrupted training as well. `dumps_calls` serialises from the real value, so
+4,139 of 12,020 Seal train rows presented `year=str!` in the prompt and
+`"year":2021` in the target — teaching a behaviour the decoder forbids.
+
+Fixed by honouring the declared type (`float` -> `number`, since Seal writes
+whole-valued floats as ints in 42 cases):
+
+| reachable ceiling | before | after |
+|---|---|---|
+| Seal in-domain | 64.4% | **91.1%** |
+| Seal out-of-domain | 71.9% | **97.4%** |
+
+Row-level accuracy is unchanged at eval time (22.5) because the model was
+trained against the broken schema; per-call argument accuracy moving 44.3 ->
+51.8 is the evidence that the mechanism works and that a retrain is what
+converts it.
+
+## Negative result: the optional-include prior is catalog-dependent
+
+Key-set errors (almost all "one optional too many") are now the largest single
+argument failure mode, and 77.8% of Seal gold calls use exactly the required
+set — which suggests a global skip-prior on the include/skip decision. Measuring
+the prior across the training mix kills the idea:
+
+| source | optionals included in gold |
+|---|---|
+| Mobile Actions | 94.1% |
+| xLAM | 81.5% |
+| dria | 72.9% |
+| DroidCall | 57.9% |
+| ToolACE | 42.8% |
+| Seal-Tools | 33.4% |
+
+A constant that helps Seal would wreck Mobile Actions. This is the repetition
+blocker again in a different costume, caught before it shipped rather than after
+it cost 51 points. The inclusion rate has to be inferred per catalog from the
+schema, which is a training problem, not a decoding constant.
+
+## Packing regression
+
+`cli.py pack` defaults to `--seq-len 512`; every good checkpoint was packed at
+640. Repacking with the default silently dropped 47,551 rows (330,025 -> 282,474)
+and the rows it drops are the longest — which on Seal-Tools means the multi-call
+ones we are trying to fix. Always pass `--seq-len 640`.
+
+## Corpus expansion
+
+| source | rows | why |
+|---|---|---|
+| dria-pythonic | 40,680 | typed Python signatures + Python call syntax: a dialect absent from the mix, and 27% parallel/multiple calls |
+| hermes-fc | 1,736 | mainstream OpenAI-style JSON tool schemas |
+| teacher round 4 | in progress | 5,191 unseen tool names per 7.7k rows; 1.1% query duplication against the existing 145,678 |
+
+Both new sources are filtered so that every scalar argument value is evidenced
+in the query — the same rule `teacher.py` already enforces on synthesised data.
+18% of dria rows fail it (they call tools with ids appearing nowhere in the
+prompt, an artifact of flattened dialogues) and are dropped: wrong argument
+values are our largest error source, so importing rows that reward inventing
+them would be worse than importing nothing.
+
+Deliberately excluded: glaive-v2 (schemas and calls embedded in free text,
+answers mostly refusals) and APIGen-MT (multi-turn agentic dialogues where a
+single-pass query would have to be fabricated from a partial conversation).
+
+---
+
+# v4 results (2026-08-18)
+
+404,290 packed rows (up 22.5% from v3's 330,025), 3 epochs, 28,227 steps on a
+3090. Final lm loss 0.073, name-head accuracy 0.982. Architecture and heads
+unchanged from v3 on purpose, so the deltas below are attributable to data plus
+the Seal schema fix and nothing else.
+
+| Suite | v3 | **v4** | Needle 2 | |
+|---|---|---|---|---|
+| Mobile Actions (961) | 82.6 | **81.5** | 63.7 | win, +17.8 |
+| DroidCall (200) | — | **47.5** | 17.0 | win, 2.8x |
+| Seal-Tools in (700) | 19.7 | **24.3** | 32.6 | loss, -8.3 |
+| Seal-Tools out (654) | 14.1 | **~18.2** | 28.7 | loss, -10.5 |
+| well-formed, all suites | 100.0 | **100.0** | 93.4 | |
+
+DroidCall carries a permanent caveat: their split script calls
+`random.shuffle()` unseeded, so their 200 rows cannot be reproduced by anyone.
+Ours is a seeded split from the same pool with those rows firewalled out of
+training. Same methodology, different rows, and it must be labelled that way.
+
+## What the run bought, and what it did not
+
+The Seal schema fix was worth doing: +4.6 in-domain and +4.1 out-of-domain for
+a bug fix. The 22.5% corpus expansion was neutral to slightly negative —
+Mobile Actions fell 1.1, entirely in 2-call rows (68.8 -> 65.1). dria is 27%
+multi-call but averages 1.5 tools per row, which is the obvious suspect: a
+multi-call habit learned under thin catalogs that does not transfer to richer
+ones. Down-weighting rather than dropping is the next thing to try.
+
+## The gap is now a single number
+
+Row accuracy factors as P(name sequence) x p^n for p = per-call argument
+accuracy. Measured on v4: seal-in 24.3 at name accuracy 80.4, and the suite's
+length mix, which back-solves to **p = 0.593**. The projection made before the
+run said p ~ 0.60 and predicted 24-25; it landed at 24.3, so the model of this
+suite is now validated rather than assumed.
+
+| p | projected seal-in |
+|---|---|
+| 0.593 | 24.3 (measured) |
+| 0.65 | 28.4 |
+| **0.687** | **32.6 — beats Needle** |
+
+Tool selection is not the constraint at 80.4% name accuracy. The entire
+remaining task is +9.4 points of per-call argument accuracy.
+
+## pass@k: search or capability?
+
+Greedy decoding makes ~20 sequential argmax decisions on a three-call row, so
+the 24.3 admits two readings with opposite fixes. Sampling k times per row and
+asking whether any sample matches gold exactly separates them (`scripts/passk.py`,
+temperature 0.8).
+
+Result (120-row shuffled sample, stopped at 60 once the signal was flat):
+
+| rows | pass@1 | pass@9 | lift |
+|---|---|---|---|
+| 20 | 35.0 | 40.0 | +5.0 |
+| 40 | 32.5 | 37.5 | +5.0 |
+| 60 | 30.0 | 35.0 | +5.0 |
+
+**Identical at every checkpoint: +5.0.** pass@9 is an oracle upper bound — it
+uses the gold answer to select among nine samples, which no deployable decoder
+can do — so +5.0 is the ceiling on everything search-based, not an estimate of
+what a real reranker would get. Seal-in 24.3 + 5.0 = 29.3 against Needle's 32.6.
+
+**Search cannot win Seal-Tools even with a perfect selector.** Beam search, RL,
+and best-of-N self-distillation are all bounded below the target, so none of them
+is the path to beating Needle here. This reverses the recommendation that would
+have been made from intuition — the objective mismatch between token-level CE and
+row-level exact match is real, but it is not what is costing us the rows.
+
+The remaining gap is capability: for most failing rows the correct call array is
+not in the model's distribution at any temperature. Only interventions that change
+what the model can produce — targeted training data, a copy mechanism, a larger
+vocabulary — can close it.
+
+## BFCL v4 single-turn (cold)
+
+Nothing in this project was tuned against BFCL and no BFCL data is in the
+training mix, so it is the only honest generalization test here. Caveat: xLAM
+is 17% of the mix and was built partly to score well on BFCL, so "unseen" is
+true of the rows, not of the distribution.
+
+| category | v4 |
+|---|---|
+| simple_python | 25.2 |
+| multiple | 22.5 |
+| live_simple | 17.1 |
+| simple_javascript | 14.0 |
+| simple_java | 13.0 |
+| parallel | 12.5 |
+| parallel_multiple | 6.0 |
+| irrelevance | **0.0** |
+
+`parallel_multiple` at 6.0 is the same conjunction failure as Seal's multi-call
+collapse. `irrelevance` at 0.0 has a separate and fully diagnosed cause:
+`lexical_scores` normalises to sum 1.0, so a single-tool catalog reports 1.0
+confidence even at zero token overlap, and the refusal override fires
+unconditionally. Compounding it, the training mix contains no refusal example
+with fewer than three tools — all ~10,700 refusal rows have 3+. The model has
+never seen "one tool offered, it does not fit, say no". Both are cheap to fix
+and neither was addressed in this run.
+
+## Negative result: no projection tax, so DCCD does not transfer
+
+DCCD (arXiv 2603.03305) reports up to +24 points by drafting unconstrained and
+only then applying the grammar, on the argument that constrained decoding pushes
+a model toward "locally valid yet semantically incorrect" trajectories. Our
+100.0% well-formed / 24.3% correct signature is precisely the symptom that paper
+describes, so it looked like the best free lever available.
+
+The mechanism requires the constraint to actually be fighting the model.
+`scripts/draft_vs_constrained.py` measures that directly — the shipped decoder
+against pure greedy generation with no grammar at all, on identical rows:
+
+| suite | free (no grammar) | constrained | tax | unparseable |
+|---|---|---|---|---|
+| Seal-Tools in (150) | 26.7 | **28.0** | -1.3 | 16 |
+| Mobile Actions (150) | 78.7 | **78.7** | +0.0 | 0 |
+
+There is no tax. The grammar is neutral on Mobile Actions and slightly positive
+on Seal-Tools, so there is no lost probability mass for draft-conditioning to
+recover, and no implementation of DCCD can help here. Routing perfectly between
+the two decoders — an oracle we do not have — would reach 31.3 on Seal-in,
+still short of Needle's 32.6.
+
+The reason the premise fails is that DCCD's evidence comes from general models
+forced into JSON, which natively prefer prose. Ours was trained only ever to
+emit this JSON, so it already places nearly all its mass on valid continuations.
+
+### What this says about grammar-constrained decoding in this project
+
+On Mobile Actions, free and constrained agree on **150 of 150 rows**. The
+grammar is not an accuracy mechanism here at all. What it buys is:
+
+- 100.0% well-formed output against Needle's 93.4%, unconditionally
+- parameter-name hallucination made structurally unreachable, since keys are
+  never generated
+- parseability on the ~11% of Seal rows where free generation emits invalid JSON
+
+Those are safety and reliability properties, and they are worth having. But the
+honest statement is that the grammar makes the model's output *trustworthy*, not
+*correct*, and earlier framing in this document overstated its contribution to
+accuracy.
