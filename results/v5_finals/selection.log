@@ -1,0 +1,8 @@
+canonical dev: 5000 rows (identical split both runs held out)
+  v5                 canonical dev = 0.2054
+  v5_devbest         canonical dev = 0.2131
+  v5_ema             canonical dev = 0.2040
+  v5_soup            canonical dev = 0.2043
+
+CHAMPION (by canonical dev, pre-registered rule): v5_ema  (0.2040)
+SELECTION_DONE

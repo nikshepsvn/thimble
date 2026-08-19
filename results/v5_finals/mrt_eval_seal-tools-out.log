@@ -1,0 +1,3 @@
+seal-tools-out   ungated          accuracy=0.255  name_acc=0.791  well_formed=1.000  non_empty=1.000  one_call=0.553  two_plus=0.205  refuse=0.000
+seal-tools-out   gated            accuracy=0.258  name_acc=0.795  well_formed=1.000  non_empty=1.000  one_call=0.564  two_plus=0.207  refuse=0.000
+seal-tools-out   gated_heads_off  accuracy=0.231  name_acc=0.719  well_formed=1.000  non_empty=1.000  one_call=0.521  two_plus=0.182  refuse=0.000

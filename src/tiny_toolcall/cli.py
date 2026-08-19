@@ -49,6 +49,14 @@ def _train_rows() -> list[dict]:
         extra = _read_rows(teacher)
         counts["teacher"] = len(extra)
         rows += extra
+    # v6 targeted synth (omission / entity-distractor / date-canonicalization
+    # focus modes, aimed at the measured v5 failure buckets) — x3: it is the
+    # corrective signal this run exists to add
+    teacher_v6 = DATA / "synth" / "teacher_v6.jsonl"
+    if teacher_v6.exists():
+        extra = _read_rows(teacher_v6)
+        counts["teacher_v6_x3"] = len(extra) * 3
+        rows += extra * 3
     # public benchmark TRAIN splits, repeated: they are the scarcest and most
     # valuable signal we have, and each one is the same distribution as an eval
     # suite we are measured on (train/eval firewall verified at conversion time)
@@ -79,7 +87,13 @@ def _train_rows() -> list[dict]:
                              ("hermes_reason", "hermes_reason.jsonl", 1),
                              ("qwen_tc", "qwen_tc.jsonl", 1),
                              ("fc_unfiltered", "fc_unfiltered.jsonl", 1),
-                             ("dria_steps", "dria_steps.jsonl", 1)):
+                             ("dria_steps", "dria_steps.jsonl", 1),
+                             # rows (already in the mix x1 via their sources)
+                             # where a call omits >=1 available optional while
+                             # using others — selective omission is the v5
+                             # error bucket the aggregate mix under-teaches;
+                             # +2 reps here makes them x3 effective
+                             ("omission_x2", "omission_exemplars.jsonl", 2)):
         f = DATA / "seeds" / fname
         if f.exists():
             extra = _read_rows(f)

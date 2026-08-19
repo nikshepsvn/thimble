@@ -1,0 +1,20 @@
+20/300 greedy=90.0 reranked=90.0 fixed=0 broke=0 (161s)
+40/300 greedy=82.5 reranked=82.5 fixed=0 broke=0 (358s)
+60/300 greedy=81.7 reranked=81.7 fixed=0 broke=0 (516s)
+80/300 greedy=80.0 reranked=80.0 fixed=0 broke=0 (706s)
+100/300 greedy=81.0 reranked=81.0 fixed=0 broke=0 (871s)
+120/300 greedy=80.8 reranked=80.8 fixed=0 broke=0 (1047s)
+140/300 greedy=82.1 reranked=82.1 fixed=0 broke=0 (1234s)
+160/300 greedy=82.5 reranked=82.5 fixed=0 broke=0 (1388s)
+180/300 greedy=82.2 reranked=82.2 fixed=0 broke=0 (1564s)
+200/300 greedy=82.0 reranked=82.0 fixed=0 broke=0 (1739s)
+220/300 greedy=81.8 reranked=81.8 fixed=0 broke=0 (1906s)
+240/300 greedy=81.7 reranked=81.7 fixed=0 broke=0 (2109s)
+260/300 greedy=81.9 reranked=81.9 fixed=0 broke=0 (2313s)
+280/300 greedy=81.4 reranked=81.4 fixed=0 broke=0 (2487s)
+300/300 greedy=81.7 reranked=81.7 fixed=0 broke=0 (2662s)
+
+=== mobile-actions  ckpt=v5_ema  n=300  k=6  temp=0.8
+greedy     81.7%
+reranked   81.7%   (fixed 0, broke 0)
+delta     +0.0 points

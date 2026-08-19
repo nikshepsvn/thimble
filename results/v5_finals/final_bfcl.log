@@ -1,0 +1,16 @@
+simple_python              n=  400  acc= 28.5%  over-context=   0  (339s)
+simple_java                n=  100  acc= 20.0%  over-context=   0  (108s)
+simple_javascript          n=   50  acc= 16.0%  over-context=   0  (54s)
+multiple                   n=  200  acc= 25.5%  over-context=   0  (209s)
+parallel                   n=  200  acc= 13.5%  over-context=   0  (316s)
+parallel_multiple          n=  200  acc= 10.5%  over-context=   2  (440s)
+irrelevance                n=  240  acc= 57.9%  over-context=   0  (95s)
+live_simple                n=  258  acc= 15.5%  over-context=   0  (295s)
+live_multiple              n= 1053  acc= 13.6%  over-context= 105  (1659s)
+live_parallel              n=   16  acc=  0.0%  over-context=   0  (22s)
+live_parallel_multiple     n=   24  acc=  4.2%  over-context=   4  (37s)
+live_relevance             n=   16  acc= 81.2%  over-context=   1  (28s)
+live_irrelevance           n=  884  acc= 30.4%  over-context=  39  (1183s)
+
+BFCL v4 single-turn, unweighted mean over 13 categories: 24.4
+wrote /workspace/tiny-toolcall/bfcl_v5_ema.json

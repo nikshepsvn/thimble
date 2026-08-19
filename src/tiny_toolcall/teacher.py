@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import Counter
 import os
 import random
 import re
@@ -22,7 +23,7 @@ from tiny_toolcall.catalog import TRAIN, schema as tool_schema
 from tiny_toolcall.schema import canon_calls
 
 API = "https://openrouter.ai/api/v1/chat/completions"
-VOLUME_MODEL = "deepseek/deepseek-v4-flash"
+VOLUME_MODEL = "deepseek/deepseek-v4-flash-0731"
 
 # Round 4 targets the two measured failures: the conjunction (row accuracy is
 # P(names) x p^n, and Seal-Tools is 56% three-call while our corpus was 5%) and
@@ -36,6 +37,10 @@ VOLUME_MODEL = "deepseek/deepseek-v4-flash"
 # that would deepen the over-calling we already have. Refusals are held high
 # because half of them now carry 1-2 tool catalogs, the case with zero coverage.
 CHAIN_MIX = [12, 14, 38, 16, 4, 16]  # one / two / three / four / five / refuse
+
+# rejection-reason tally, printed by synth_teacher at the end of a batch —
+# acceptance economics are part of the recipe, so failures must be attributable
+REJECTS: "Counter[str]" = Counter()
 
 NAMING = [
     "snake_case (set_lights)", "camelCase (setLights)", "PascalCase (SetLights)",
@@ -78,6 +83,32 @@ STYLES = [
     "lowercase no punctuation", "mentions a person or place by name",
 ]
 
+# v6 focus modes, each aimed at a measured v5 failure bucket (diag 2026-08-19:
+# 66/193 failing calls added exactly one unmentioned optional; 129/193 bound a
+# wrong value). "plain" keeps a control slice of the v5 distribution.
+FOCUS_OMIT = (
+    "Every invented tool must have 3-5 parameters, at most one of them required. "
+    "The query must state values for only a minority of the optional parameters. "
+    "Answers must include ONLY the parameters whose values the query states — "
+    "the point of this example is OMITTING optionals the query never mentioned. "
+    "Never include an argument whose exact value the query does not state.\n"
+)
+FOCUS_CANON = (
+    "One tool parameter must expect a DATE in ISO format (YYYY-MM-DD) and the "
+    "query must state that date in natural language instead ('March 5th 2024', "
+    "'the 12th of January next year' is NOT allowed - the year must be stated). "
+    "The answer uses the ISO form. All OTHER argument values must still be "
+    "copyable verbatim from the query.\n"
+)
+FOCUS_DISTRACT = (
+    "The query must contain at least two different values of the SAME type (two "
+    "dates, two numbers, two names, or two places) that belong in different "
+    "argument slots or different calls. Binding each value to the right slot "
+    "must require reading the query carefully; the values must never be equal. "
+    "Copy every value character-for-character as the query writes it — dates, "
+    "numbers, and names exactly as written, never reformatted.\n"
+)
+
 SYSTEM = """You generate training data for a tiny on-device function-calling model.
 Produce ONE example as strict JSON. When asked to invent tools, output:
 {"tools": [{"name": "...", "description": "...", "parameters": {"type": "object", "properties": {"arg": {"type": "string|integer|number|boolean"}}, "required": ["..."]}}, ...],
@@ -110,6 +141,53 @@ def _extract_json(text: str) -> dict | None:
         return json.loads(m.group(0))
     except json.JSONDecodeError:
         return None
+
+
+_MONTHS = ["january", "february", "march", "april", "may", "june", "july",
+           "august", "september", "october", "november", "december"]
+
+
+def _canon_evidenced(v: str, q: str) -> bool:
+    """Deterministic canonical-form evidence: an ISO date counts as evidenced
+    when its year, month, and day each appear naturally in the query. Extends
+    the verbatim rule without opening the door to invented values."""
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", v)
+    if not m:
+        return False
+    year, month, day = m.group(1), int(m.group(2)), int(m.group(3))
+    if year not in q:
+        return False
+    if not (1 <= month <= 12) or _MONTHS[month - 1] not in q and f"{month}/" not in q:
+        return False
+    return re.search(rf"\b0?{day}(st|nd|rd|th)?\b", q) is not None
+
+
+def _strip_unevidenced(ex: dict, tools_by_name: dict[str, dict]) -> None:
+    """Repair-not-reject: drop OPTIONAL args whose value the query never states.
+
+    The teacher model itself pads calls with unmentioned optionals (measured:
+    73% rejection on the v6 smoke, concentrated in focus rows). Dropping the
+    padded arg yields exactly the omission labeling the focus mode exists to
+    teach; required args are left for _validate to reject as before.
+    """
+    q = (ex.get("query") or "").lower()
+    for call in ex.get("answers") or []:
+        tool = tools_by_name.get(call.get("name"))
+        args = call.get("arguments")
+        if not tool or not isinstance(args, dict):
+            continue
+        params = tool["parameters"]
+        required = set(params.get("required", []) or [])
+        for k in list(args):
+            if k in required:
+                continue
+            v = args[k]
+            if isinstance(v, str) and len(v) > 2 and v.lower() not in q \
+                    and not _canon_evidenced(v, q):
+                del args[k]
+            elif isinstance(v, (int, float)) and not isinstance(v, bool) \
+                    and str(v) not in ex["query"] and abs(float(v)) > 1:
+                del args[k]
 
 
 def _validate(ex: dict, tools_by_name: dict[str, dict], template: str) -> str | None:
@@ -156,8 +234,9 @@ def _validate(ex: dict, tools_by_name: dict[str, dict], template: str) -> str | 
             if typ == "string":
                 if not isinstance(v, str):
                     return f"{k} must be string"
-                # groundedness: value must be evidenced in the query
-                if len(v) > 2 and v.lower() not in q:
+                # groundedness: value must be evidenced in the query, verbatim
+                # or via a deterministic canonical transform (ISO dates)
+                if len(v) > 2 and v.lower() not in q and not _canon_evidenced(v, q):
                     return f"value {v!r} for {k} not evidenced in query"
             if typ in ("integer", "number") and str(v) not in ex["query"]:
                 if not isinstance(v, bool) and abs(float(v)) > 1:
@@ -222,7 +301,11 @@ async def _one_trace(
     template = rng.choices(["one", "two", "three", "four", "five", "refuse"],
                            weights=CHAIN_MIX)[0]
     style = rng.choice(STYLES)
+    focus = "plain" if template == "refuse" else \
+        rng.choices(["omit", "distract", "canon", "plain"], weights=[30, 25, 25, 20])[0]
     invent = rng.random() < 0.7  # 30% stays on the device-control anchor catalog
+    if focus in ("omit", "canon"):
+        invent = True  # these modes need control over the invented schemas
     if invent:
         # half the invented rows come from domains far outside device control, and
         # the naming convention is sampled — the first corpus was 99.6% snake_case,
@@ -238,6 +321,7 @@ async def _one_trace(
             f"n_tools={n_want}\n"
             + ("At least two parameters across the catalog must be integer or number typed, "
                "and the query must state those values as digits.\n" if numeric else "")
+            + {"omit": FOCUS_OMIT, "distract": FOCUS_DISTRACT, "canon": FOCUS_CANON}.get(focus, "")
             + "Invent tools for this domain using that naming convention, then generate one example now."
         )
         schemas: list[dict] = []
@@ -249,9 +333,11 @@ async def _one_trace(
         tools_by_name = {s["name"]: s for s in schemas}
         user = (
             f"template={template}\nstyle={style}\ntools:\n{json.dumps(schemas, ensure_ascii=False)}\n"
-            "Generate one example now."
+            + (FOCUS_DISTRACT if focus == "distract" else "")
+            + "Generate one example now."
         )
     messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
+    err: str | None = "no attempt completed"
     for _ in range(2):
         async with sem:
             try:
@@ -261,7 +347,9 @@ async def _one_trace(
                         "model": model,
                         "messages": messages,
                         "temperature": 1.0,
-                        "max_tokens": 1600 if invent else 600,
+                        # 0731 spends 400-800 reasoning tokens even with the flag
+                        # off (measured); budget must cover reasoning + full JSON
+                        "max_tokens": 3200 if invent else 1600,
                         "reasoning": {"enabled": False},  # thinking off per plan
                         "provider": {"sort": "throughput"},
                     },
@@ -290,6 +378,7 @@ async def _one_trace(
                 if not row_schemas:
                     err = "invalid invented tools"
             if err is None and ex is not None:
+                _strip_unevidenced(ex, row_by_name)
                 err = _validate(ex, row_by_name, template)
             if err is None and ex is not None:
                 q_norm = " ".join(ex["query"].lower().split())
@@ -305,10 +394,12 @@ async def _one_trace(
                 "tools": row_schemas,
                 "answers": canon_calls(ex["answers"]),
                 "kind": template,
+                "focus": focus,
                 "split": "teacher",
             }
         messages.append({"role": "assistant", "content": text})
         messages.append({"role": "user", "content": f"Invalid: {err}. Emit corrected JSON only."})
+    REJECTS[f"{focus}: {(err or 'http error')[:60]}"] += 1
     return None
 
 
@@ -355,4 +446,6 @@ async def synth_teacher(n: int, out: Path, model: str = VOLUME_MODEL, concurrenc
                         print(f"teacher: {ok} ok / {bad} rejected, ~${cap.spent:.2f} spent")
                         f.flush()
     print(f"teacher final: {ok} ok / {bad} rejected, ~${cap.spent:.2f} spent")
+    for reason, n in REJECTS.most_common(8):
+        print(f"  reject x{n}: {reason}")
     return {"ok": ok, "rejected": bad, "spent_usd": round(cap.spent, 2)}
