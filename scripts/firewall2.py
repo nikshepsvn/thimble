@@ -89,6 +89,14 @@ def sweep(path: Path, grams, exact) -> None:
 
 
 def main() -> None:
+    # NOTE: official benchmark TRAIN splits (seal_train, official_train,
+    # droidcall_train_heldout) are exempt from this sweep. Verified 2026-08-19:
+    # 36% of seal_train shares 8-grams with eval yet contains ZERO exact query
+    # duplicates — the overlap is template phrasing inherent to how the
+    # benchmark was generated, and training on the provided split is the
+    # benchmark's own protocol. The exact-query firewall at mix time still
+    # applies to them. This sweep is for third-party imports, where shared
+    # 8-grams imply copied rows.
     grams, exact = build_eval_index()
     targets = sys.argv[1:] or ["bitagent.jsonl", "dolci.jsonl", "apigen.jsonl",
                                "dria.jsonl", "hermes.jsonl", "xlam.jsonl", "toolace.jsonl"]

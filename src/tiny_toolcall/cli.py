@@ -230,6 +230,10 @@ def cmd_train(args) -> None:
         cfg.setdefault("loss", {})["structure"] = args.w_structure
     if getattr(args, "w_keys", None) is not None:
         cfg.setdefault("loss", {})["keys"] = args.w_keys
+    if getattr(args, "anneal_data", ""):
+        cfg.setdefault("train", {})["anneal_dir"] = str(DATA / "packed" / args.anneal_data)
+    if getattr(args, "no_warmup", False):
+        cfg.setdefault("train", {})["no_warmup"] = True
     stats = train(model, ids, tags, dec, cfg, save_path=CKPT / f"{args.name}.pt")
     print("final:", stats)
 
@@ -361,6 +365,8 @@ def main() -> None:
     p.add_argument("--name", default="sft")
     p.add_argument("--init", default="", help="warm-start from this checkpoint name")
     p.add_argument("--lr-scale", type=float, default=1.0, help="scale LRs (use <1 when warm-starting)")
+    p.add_argument("--anneal-data", default="", help="packed dir name used for the decay phase (data annealing)")
+    p.add_argument("--no-warmup", action="store_true", help="skip LR warmup (continued runs from a plateau checkpoint)")
     p.add_argument("--w-structure", type=float, default=None, help="loss weight override for forced structural tokens")
     p.add_argument("--w-keys", type=float, default=None, help="loss weight override for forced key tokens")
     p.set_defaults(fn=cmd_train)

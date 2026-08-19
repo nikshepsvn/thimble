@@ -215,15 +215,59 @@ def train(
     if cur:
         batches.append(np.array(cur))
     steps_total = len(batches) * epochs
-    warmup = max(10, steps_total // 20)
+    # Continued runs resume a plateau checkpoint at plateau LR; re-warming from
+    # zero measurably regresses (Parmar et al. 2024, "Reuse, Don't Retrain").
+    warmup = 10 if tr.get("no_warmup") else max(10, steps_total // 20)
+
+    # Decay-phase data annealing (MiniCPM / Llama-3 / OLMo-2 practice; switch
+    # point inside decay per Parmar et al.): when an anneal pack is configured,
+    # the DATA switches to it for the decay phase (frac >= 0.8) while the step
+    # count and LR schedule stay exactly as the main pack defined them.
+    an_batches: list = []
+    an_ids_t = an_tags_t = None
+    an_dec: list = []
+    an_real_len = None
+    if tr.get("anneal_dir"):
+        from tiny_toolcall.data import load_packed
+        a_ids, a_tags, an_dec = load_packed(Path(tr["anneal_dir"]))
+        an_real_len = (a_ids != 0).sum(axis=1)
+        a_order = np.argsort(an_real_len, kind="stable")
+        cur, cur_max = [], 0
+        for idx in a_order.tolist():
+            length = min(seq_len, (int(an_real_len[idx]) + 63) // 64 * 64)
+            if cur and ((len(cur) + 1) * max(cur_max, length) > budget or len(cur) >= 128):
+                an_batches.append(np.array(cur))
+                cur, cur_max = [], 0
+            cur.append(idx)
+            cur_max = max(cur_max, length)
+        if cur:
+            an_batches.append(np.array(cur))
+        an_ids_t = torch.from_numpy(a_ids.astype(np.int64))
+        an_tags_t = torch.from_numpy(a_tags.astype(np.int64))
+        np.random.shuffle(an_batches)
+        print(f"anneal pack: {a_ids.shape[0]} rows, {len(an_batches)} batches (used for frac >= 0.8)")
+    an_pos = 0
+
     for ep in range(epochs):
         np.random.shuffle(batches)
         for sel in batches:
-            blen = int(real_len[sel].max())
-            blen = min(seq_len, (blen + 63) // 64 * 64)
-            bi = ids_t[sel][:, :blen].to(device)
-            bt = tags_t[sel][:, :blen].to(device)
-            bd = [decisions[j] for j in sel]
+            if an_batches and step / steps_total >= 0.8:
+                if an_pos >= len(an_batches):
+                    np.random.shuffle(an_batches)
+                    an_pos = 0
+                sel = an_batches[an_pos]
+                an_pos += 1
+                blen = int(an_real_len[sel].max())
+                blen = min(seq_len, (blen + 63) // 64 * 64)
+                bi = an_ids_t[sel][:, :blen].to(device)
+                bt = an_tags_t[sel][:, :blen].to(device)
+                bd = [an_dec[j] for j in sel]
+            else:
+                blen = int(real_len[sel].max())
+                blen = min(seq_len, (blen + 63) // 64 * 64)
+                bi = ids_t[sel][:, :blen].to(device)
+                bt = tags_t[sel][:, :blen].to(device)
+                bd = [decisions[j] for j in sel]
             loss, stats = step_loss(model, bi, bt, bd, weights)
             for opt in (opt_m, opt_a):
                 opt.zero_grad(set_to_none=True)
