@@ -2,7 +2,7 @@
 
 **A 48M-parameter tool-calling model that beats [Needle 2](https://cactuscompute.com/needle)
 (Cactus Compute, 45M, 153B training tokens) on 3 of its 5 published benchmarks —
-including the one it's named after — with 150× less training data.** MIT.
+including their toughest, Seal-Tools — with 150× less training data.** MIT.
 
 **[Model on Hugging Face](https://huggingface.co/flashvenom/thimble)** ·
 [The full experimental record](RESULTS.md) · Total build cost: ~$260

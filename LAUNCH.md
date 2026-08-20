@@ -36,7 +36,7 @@ survivable because the receipts are genuinely good.
 
 **1/** We built a 48M-param tool-calling model that beats Needle 2 — a 45M model
 trained on 153B tokens — on 3 of its 5 published benchmarks. Including Seal-Tools,
-the one it's named after.
+the headline suite of their eval.
 
 Ours saw ~1B tokens. 150x less. Total cost: $260. [chart image]
 

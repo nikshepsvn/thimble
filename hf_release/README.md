@@ -69,7 +69,7 @@ model-index:
 # 🧵 Thimble
 
 **A 48M-parameter tool-calling model that beats [Needle 2](https://cactuscompute.com/needle)
-on 3 of its 5 published benchmarks — including the one it's named after — with 150× less training data.**
+on 3 of its 5 published benchmarks — including their toughest, Seal-Tools — with 150× less training data.**
 
 [**GitHub (code, evals, full experimental record)**](https://github.com/nikshepsvn/thimble) · MIT · 48.12M params · 11.5MB at 2-bit · $260 total build cost
 
