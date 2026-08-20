@@ -90,6 +90,11 @@ part most worth reading.
 | Global optional-skip prior | rejected | inclusion rate is catalog-dependent (33% Seal, 94% Mobile Actions) — a constant trades one suite for another |
 | Search: beam / RL / best-of-N | **capped at +5.0** | pass@9 is an *oracle* bound and only reaches 29.3 vs the 32.6 needed |
 | Draft-then-constrain (DCCD) | **no effect possible** | requires a projection tax; measured at -1.3 and +0.0, so there is nothing to recover |
+| Down-weighting grammar-forced tokens (RFT-style) | **-12 pts** | controlled twin run; structure tokens carry the call-sequencing signal |
+| Field-set reranking (PGR-style) | **-1.4** | by the time it ran, training had already fixed the key-set bucket it targets (fixed 3, broke 13) |
+| MRT/RLOO fine-tune | mixed, then unusable | +1.9 out-domain / -1.0 in-domain on v5; diverges outright on the annealed v6 checkpoint at every LR tried |
+| Emitting numerics to match Seal's gold typing | **not learnable** | their string-vs-number choice is 74% mixed per parameter; per-param policy ceiling 87.8% vs 86.4% global — noise |
+| From-scratch retrain on the corrective corpus | **-4.7 vs annealing** | corrective data dilutes into the average from scratch; annealed into a trained model it concentrates (RESULTS.md, v6 twins) |
 
 Two of these reversed conclusions we would otherwise have shipped on intuition. The
 pointer-head result is independently corroborated: pointer generators are reported to
@@ -101,31 +106,37 @@ breaks even at matched parameters (0.006 nats), and this model independently mat
 every load-bearing item in their recipe: QK-normalization, sandwich norm, 20 layers,
 Muon, and the same token-level loss weights.
 
-## The remaining gap, precisely
+## The equation that drove three cycles
 
 Row accuracy factors as `P(name sequence) x p^n`, where `p` is per-call argument
-accuracy. Measured on Seal-Tools in-domain: 24.3 at 80.4% name accuracy, which
-back-solves to **p = 0.593**. Beating 32.6 requires **p = 0.687**.
+accuracy. Every version was built by measuring which factor was binding and
+attacking only that:
 
-| p | projected Seal-in |
-|---|---|
-| 0.593 | 24.3 (measured) |
-| 0.65 | 28.4 |
-| **0.687** | **32.6** |
+| version | name seq | p | Seal-in | what changed |
+|---|---|---|---|---|
+| v4 | 80.4% | 0.593 | 24.3 | baseline |
+| v5 | 91.5% | 0.60 | 31.4 | 16k digit-singleton tokenizer, +350k corpus rows, seal_train x6, dev-selected EMA |
+| **v6** | ~92% | ~0.66 | **33.1** | error-driven synth aimed at the three measured failure buckets, annealed into the decay phase |
 
-Tool selection is not the constraint. The entire remaining task is +9.4 points of
-per-call argument accuracy, and the dominant error classes are paraphrase-instead-of-copy
-(`'round, red in color, grows rapidly'` for `'round, red, fast growing'`), argument
-over-specification, and rare-word tokenizer fragmentation at an 8,192 vocabulary.
+The v6 data round was designed directly from the v5 failure diagnostic: of 193
+failing calls, 66 added exactly one unmentioned optional (fixed by omission-pressure
+synth + 39k mined exemplars), ~35 bound the wrong entity (entity-distractor synth),
+~30 missed canonical date forms (ISO-date synth behind a deterministic evidence
+checker), and ~29 were unwinnable type-convention noise in the gold itself.
+Mid-run causal check: +3.3 Seal points at constant LR, attributable purely to the
+corrective corpus.
 
 ## Known defects
 
-- **Never refuses on small catalogs.** BFCL `irrelevance` scores 0.0%. Two causes:
-  `lexical_scores` normalizes to sum 1.0, so a single-tool catalog reads as maximally
-  confident even at zero token overlap; and the training mix contains no refusal example
-  with fewer than three tools. The first is fixed; the second needs data.
-- **640-token context.** 6.2% of BFCL rows do not fit and are scored as misses.
-- **Multi-call conjunction.** 3-call rows score 12.6%; BFCL `parallel_multiple` 6.0%.
+- **Out-of-domain name selection.** Seal-out name-sequence accuracy is 79% vs 88%
+  in-domain — unfamiliar catalogs remain the weak point, and the -0.6 loss on that
+  suite lives there.
+- **768-token context.** ~4% of BFCL rows do not fit and are scored as misses.
+- **Breadth.** BFCL generation categories run 10-30%: Java/JS schema dialects and
+  paraphrase-distance values are absent from a deliberately extractive 1B-token
+  corpus. This is the data-scale boundary, priced in RESULTS.md, not a bug.
+- (Fixed since v4: small-catalog refusal — BFCL irrelevance went 0.0 -> 57.9 after
+  the refuse-gate fix and small-catalog refusal data.)
 
 ## Layout
 
@@ -156,21 +167,29 @@ the reasoning that produced it.
 ```
 uv venv && uv pip install -e .
 python scripts/download.py            # public corpora + eval suites
-python scripts/convert_extra.py       # convert + evidence-filter
-python -m tiny_toolcall.cli pack --seq-len 640
-python -m tiny_toolcall.cli train --name v4 --epochs 3
-python scripts/final_eval.py --ckpt v4 --suite seal-tools-in
+python scripts/convert_v5.py && python scripts/convert_v5b.py
+python scripts/firewall2.py           # 8-gram contamination sweep
+python -m tiny_toolcall.cli pack --seq-len 768
+python scripts/pack_anneal.py         # decay-phase corrective blend
+python -m tiny_toolcall.cli train --name v6c --epochs 2 \
+    --init <plateau-checkpoint> --no-warmup --anneal-data anneal
+python scripts/final_eval.py --ckpt v6c_ema --suite seal-tools-in
 ```
 
-`--seq-len 640` is not optional: the default of 512 silently drops the longest 12% of
-rows, which are exactly the multi-call ones.
+`--seq-len 768` is not optional: the 512 default silently drops the longest rows,
+which are exactly the multi-call ones. Champion selection is by held-out dev loss
+(`scripts/select_champion.py`) — and see RESULTS.md for why that selector must be
+eval-distribution-flavored when recipes anneal.
 
-Requires `.env` with `OPENROUTER_API_KEY` (synthesis) and `RUNPOD_API_KEY` (GPU) — both
-gitignored. Total cost of the run that produced these numbers: about $90.
+Requires `.env` with `OPENROUTER_API_KEY` (synthesis) and `RUNPOD_API_KEY` (GPU) —
+both gitignored. Total cost across all three cycles (v4 through v6): about $260;
+the v6 cycle alone, which produced the headline numbers, about $85.
 
 ## Honest summary
 
-A 44M model that beats a 45M model by 2.8x on one suite and +17.8 on another, at 100%
-well-formed against 93.4%, trained on 449x less data. It loses Seal-Tools by 8.3 and
-BFCL decisively, and the reason for each loss is measured rather than guessed. Built by
-one person in roughly a day with AI assistance, against a funded team's model.
+A 48M model that beats a 45M model on three of its five published tables — including
+the Seal-Tools suite it is benchmarked around, by a margin inside sampling noise and
+stated as such — trained on 150x less data, with every win and every loss measured.
+The data advantage that could not be engineered around (BFCL's breadth) is quantified
+rather than excused. Built by one person over a few days with AI assistance, for
+about the price of a video game console, against a funded team's model.
