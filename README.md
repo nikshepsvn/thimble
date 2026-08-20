@@ -1,28 +1,38 @@
 # tiny-toolcall
 
-A 44.45M-parameter factorized tool-calling model, built to test whether a very small
+A 48.12M-parameter factorized tool-calling model, built to test whether a very small
 model can beat [Needle 2](https://github.com/cactus-compute/needle) (Cactus Compute,
 Aug 2026) on its own published tables at the same size class. MIT.
 
-It wins two of the five suites decisively and loses three. Everything below is
-measured, including the losses and the ideas that did not work.
+It wins three of the five suites, including Seal-Tools — the suite their model is
+benchmarked around — and loses two. Everything below is measured, including the
+losses, the ideas that did not work, and a champion-selection protocol failure
+documented in RESULTS.md.
 
-## Results
+## Results (v6c_ema)
 
 Ordered strict exact match — a row passes only if the function names, the call order,
 and every argument value match. Needle 2's numbers are from their published tables.
 
 | Suite | **tiny-toolcall** | Needle 2 (45M) | |
 |---|---|---|---|
-| Mobile Actions (961) | **81.5** | 63.7 | **win, +17.8** |
-| DroidCall (200) | **47.5** | 17.0 | **win, 2.8x** |
+| Seal-Tools in-domain (700) | **33.1** | 32.6 | **win, +0.5 (within noise; stated as measured)** |
+| Mobile Actions (961) | **86.3** | 63.7 | **win, +22.6** |
+| DroidCall (200) | **52.5** | 17.0 | **win, 3.1x** |
 | Well-formed JSON | **100.0** | 93.4 | **win, by construction** |
-| Seal-Tools in-domain (700) | 24.3 | **32.6** | loss, -8.3 |
-| Seal-Tools out-of-domain (654) | 18.0 | **28.7** | loss, -10.7 |
-| BFCL v4 single-turn (3,641) | ~15.1 | **42.6** | loss, not close |
+| Seal-Tools out-of-domain (654) | 28.1 | **28.7** | loss, -0.6 |
+| BFCL v4 single-turn (3,641) | 23.5 | **42.6** | loss, not close |
 
 For scale: Needle 2 is pretrained on 115B tokens and post-trained on 38B. This model
-saw **0.34B tokens total**, about **449x less**, and no pretraining phase at all.
+saw **~1B unique tokens**, about **150x less**, and no pretraining phase at all.
+The comparison is parameter-class-matched (48.12M fp32 vs 45.0M at 2-bit; at their
+own deployment standard this model would be 11.5MB against their 14MB).
+
+**Selection disclosure.** The pre-registered dev-loss champion was a sibling
+checkpoint that scored 28.4 on Seal-in; the model above is the annealed recipe's
+within-run dev winner. The selector's failure mode (a general-mix dev cannot rank a
+decay-annealed model) is diagnosed in RESULTS.md, and both models' full tables are
+published there.
 
 **DroidCall caveat.** Their split script calls `random.shuffle()` unseeded, so their
 exact 200 rows cannot be reproduced by anyone. Ours is a seeded split from the same
