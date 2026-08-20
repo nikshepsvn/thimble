@@ -21,3 +21,4 @@ bfcl_*.json
 diag_*.json
 draft_vs_con_*.json
 final_*.json
+hf_release/*.pt

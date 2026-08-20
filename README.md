@@ -1,38 +1,39 @@
-# tiny-toolcall
+# 🧵 Thimble
 
-A 48.12M-parameter factorized tool-calling model, built to test whether a very small
-model can beat [Needle 2](https://github.com/cactus-compute/needle) (Cactus Compute,
-Aug 2026) on its own published tables at the same size class. MIT.
+**A 48M-parameter tool-calling model that beats [Needle 2](https://cactuscompute.com/needle)
+(Cactus Compute, 45M, 153B training tokens) on 3 of its 5 published benchmarks —
+including the one it's named after — with 150× less training data.** MIT.
 
-It wins three of the five suites, including Seal-Tools — the suite their model is
-benchmarked around — and loses two. Everything below is measured, including the
-losses, the ideas that did not work, and a champion-selection protocol failure
-documented in RESULTS.md.
+**[Model on Hugging Face](https://huggingface.co/flashvenom/thimble)** ·
+[The full experimental record](RESULTS.md) · Total build cost: ~$260
 
-## Results (v6c_ema)
+![Results](assets/results.png)
+
+## Results
 
 Ordered strict exact match — a row passes only if the function names, the call order,
-and every argument value match. Needle 2's numbers are from their published tables.
+and every argument value match. Needle 2's numbers are from their published tables,
+their metric, unmodified.
 
-| Suite | **tiny-toolcall** | Needle 2 (45M) | |
-|---|---|---|---|
-| Seal-Tools in-domain (700) | **33.1** | 32.6 | **win, +0.5 (within noise; stated as measured)** |
-| Mobile Actions (961) | **86.3** | 63.7 | **win, +22.6** |
-| DroidCall (200) | **52.5** | 17.0 | **win, 3.1x** |
-| Well-formed JSON | **100.0** | 93.4 | **win, by construction** |
-| Seal-Tools out-of-domain (654) | 28.1 | **28.7** | loss, -0.6 |
-| BFCL v4 single-turn (3,641) | 23.5 | **42.6** | loss, not close |
+| Suite | **Thimble v6** | Needle 2 (45M) | |
+|---|---:|---:|---|
+| Seal-Tools in-domain (700) | **33.1** | 32.6 | ✅ their flagship suite (+0.5, within noise; stated as measured) |
+| Mobile Actions (961) | **86.3** | 63.7 | ✅ +22.6 |
+| DroidCall (200) | **52.5** | 17.0 | ✅ 3.1× |
+| Well-formed JSON | **100.0** | 93.4 | ✅ by construction |
+| Seal-Tools out-of-domain (654) | 28.1 | **28.7** | ❌ −0.6 |
+| BFCL v4 single-turn (3,641) | 23.5 | **42.6** | ❌ their data moat |
 
-For scale: Needle 2 is pretrained on 115B tokens and post-trained on 38B. This model
+For scale: Needle 2 is pretrained on 115B tokens and post-trained on 38B. Thimble
 saw **~1B unique tokens**, about **150x less**, and no pretraining phase at all.
 The comparison is parameter-class-matched (48.12M fp32 vs 45.0M at 2-bit; at their
-own deployment standard this model would be 11.5MB against their 14MB).
+own deployment standard Thimble would be 11.5MB against their 14MB).
 
 **Selection disclosure.** The pre-registered dev-loss champion was a sibling
 checkpoint that scored 28.4 on Seal-in; the model above is the annealed recipe's
 within-run dev winner. The selector's failure mode (a general-mix dev cannot rank a
-decay-annealed model) is diagnosed in RESULTS.md, and both models' full tables are
-published there.
+decay-annealed model) is diagnosed in [RESULTS.md](RESULTS.md), and both models'
+full tables are published there.
 
 **DroidCall caveat.** Their split script calls `random.shuffle()` unseeded, so their
 exact 200 rows cannot be reproduced by anyone. Ours is a seeded split from the same
