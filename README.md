@@ -163,6 +163,28 @@ scripts/
 `RESULTS.md` carries the full experimental record, including every negative result and
 the reasoning that produced it.
 
+## Try it in 30 seconds
+
+Download `thimble-v6.pt` from the [HF repo](https://huggingface.co/flashvenom/thimble)
+into `checkpoints/`, then:
+
+```
+$ python demo.py "make a reservation at Nobu for 2 people at 7pm and text Sam saying dinner is on"
+[
+  {"name": "createReservation",
+   "arguments": {"partySize": 2, "restaurant": "Nobu", "time": "7pm"}},
+  {"name": "sendMessage",
+   "arguments": {"body": "dinner is on", "contact": "Sam"}}
+]
+
+$ python demo.py "sing me a happy birthday song"
+[]  (refused: no tool applies)
+```
+
+Real output, not a mock — note the typed integer `partySize`, the two-call
+composition, and the refusal. `python demo.py` with no arguments runs a small
+example set.
+
 ## Reproducing
 
 ```

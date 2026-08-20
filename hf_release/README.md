@@ -156,8 +156,21 @@ The guarantees live in the decoding harness, so inference goes through the repo:
 git clone https://github.com/nikshepsvn/thimble
 cd thimble && uv venv && uv pip install -e .
 # put thimble-v6.pt in checkpoints/, tokenizer.json in data/
-python scripts/final_eval.py --ckpt thimble-v6 --suite seal-tools-in
+
+python demo.py "make a reservation at Nobu for 2 people at 7pm and text Sam saying dinner is on"
+# [{"name": "createReservation",
+#   "arguments": {"partySize": 2, "restaurant": "Nobu", "time": "7pm"}},
+#  {"name": "sendMessage",
+#   "arguments": {"body": "dinner is on", "contact": "Sam"}}]
+
+python demo.py "sing me a happy birthday song"
+# []  (refused: no tool applies)
+
+python scripts/final_eval.py --ckpt thimble-v6 --suite seal-tools-in  # reproduce the table
 ```
+
+Real output, not a mock — typed integers, two-call composition, and refusal,
+with structure guaranteed by the grammar.
 
 ## Integrity
 
