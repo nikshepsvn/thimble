@@ -1,0 +1,45 @@
+=== endgame armed Wed Aug 19 12:13:45 UTC 2026 ===
+pod A complete Wed Aug 19 16:58:45 UTC 2026
+pod B complete Wed Aug 19 19:23:50 UTC 2026
+checkpoints/pulls/A:
+total 0
+drwxr-xr-x 2 root root 111 Aug 19 19:23 .
+drwxr-xr-x 4 root root  24 Aug 18 21:09 ..
+lrwxrwxrwx 1 root root  42 Aug 18 21:09 v5.pt -> /workspace/tiny-toolcall/checkpoints/v5.pt
+lrwxrwxrwx 1 root root  50 Aug 18 21:09 v5_devbest.pt -> /workspace/tiny-toolcall/checkpoints/v5_devbest.pt
+lrwxrwxrwx 1 root root  46 Aug 18 21:09 v5_ema.pt -> /workspace/tiny-toolcall/checkpoints/v5_ema.pt
+lrwxrwxrwx 1 root root  43 Aug 19 19:23 v6c.pt -> /workspace/tiny-toolcall/checkpoints/v6c.pt
+lrwxrwxrwx 1 root root  51 Aug 19 19:23 v6c_devbest.pt -> /workspace/tiny-toolcall/checkpoints/v6c_devbest.pt
+lrwxrwxrwx 1 root root  47 Aug 19 19:23 v6c_ema.pt -> /workspace/tiny-toolcall/checkpoints/v6c_ema.pt
+
+checkpoints/pulls/B:
+total 564212
+drwxr-xr-x 2 root root        60 Aug 19 19:23 .
+drwxr-xr-x 4 root root        24 Aug 18 21:09 ..
+-rw-r--r-- 1 root root 192569716 Aug 19 18:55 v6s.pt
+-rw-r--r-- 1 root root 192587708 Aug 19 18:54 v6s_devbest.pt
+-rw-r--r-- 1 root root 192586040 Aug 19 18:55 v6s_ema.pt
+=== champion selection (canonical dev) Wed Aug 19 19:23:51 UTC 2026 ===
+canonical dev: 5000 rows (identical split both runs held out)
+  v6c                canonical dev = 0.1947
+  v6c_devbest        canonical dev = 0.1962
+  v6c_ema            canonical dev = 0.1847
+  v6c_soup           canonical dev = 0.1875
+  v6s                canonical dev = 0.1821
+  v6s_devbest        canonical dev = 0.1815
+  v6s_ema            canonical dev = 0.1815
+  v6s_soup           canonical dev = 0.1797
+
+CHAMPION (by canonical dev, pre-registered rule): v6s_soup  (0.1797)
+CHAMPION: v6s_soup
+=== full scorecard on v6s_soup Wed Aug 19 19:26:23 UTC 2026 ===
+SCORECARD_COMPLETE Wed Aug 19 19:26:25 UTC 2026
+== /workspace/final_v6_bfcl.log
+== /workspace/final_v6_droidcall.log
+== /workspace/final_v6_mobile-actions.log
+== /workspace/final_v6_seal-tools-in.log
+== /workspace/final_v6_seal-tools-out.log
+ENDGAME_COMPLETE Wed Aug 19 19:26:25 UTC 2026
+SCORECARD_DONE Thu Aug 20 07:44:57 UTC 2026
+SCORECARD_DONE Thu Aug 20 09:14:28 UTC 2026
+V6C_SCORECARD_DONE Thu Aug 20 11:04:32 UTC 2026

@@ -719,3 +719,22 @@ above; both tables are published. The honest headline is exactly that.
 Selector fix for any future cycle: candidates must be ranked on an
 eval-distribution-flavored, eval-free split (a seal_train holdout), not on
 the general training mix, whenever recipes diverge in training distribution.
+
+## Negative result: RLOO destabilizes the annealed checkpoint
+
+With Seal-out at 28.1 vs 28.7, the one measured lever was MRT (+1.9 out-domain
+on v5). Three one-shot attempts on v6c_ema, all governed by train-metric
+watchdogs, no eval contact:
+- lr 2e-5 (v5's recipe, halved rows): mean_r 0.50 -> -0.12 by update 200;
+  loss exploded to 41. Genuine divergence.
+- lr 5e-6: aborted by an over-strict watchdog (single loss print > 5 while
+  mean_r was healthy). Friendly fire, recorded as such.
+- lr 5e-6, corrected watchdog: healthy to update 550 (mean_r 0.92), then
+  collapsed 0.92 -> 0.13 by 650. Genuine divergence, caught and aborted.
+
+The same recipe that ran stably on v5_ema (a conventionally decayed
+checkpoint) diverges on v6c_ema at every dose tried. Reading: decay-phase
+annealing leaves the model in a sharper, more concentrated minimum, and
+policy-gradient noise unravels exactly the specialization the anneal bought.
+Seal-out stays 28.1 vs 28.7 — by measurement, not forfeit. v6c_ema ships
+unmodified at 3-of-5.

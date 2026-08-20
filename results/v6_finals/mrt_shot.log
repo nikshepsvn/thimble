@@ -1,0 +1,36 @@
+=== Thu Aug 20 11:03:17 UTC 2026 one-shot conservative MRT on v6c_ema (n=1500 alpha=0.5 lr=2e-5, config fixed from v5 dose-response, no eval tuning) ===
+RLOO fine-tune: 1500 rows (70% multi-call), k=4
+50 updates (63 skipped) loss=2.450 mean_r=0.44 (688s)
+100 updates (122 skipped) loss=-0.109 mean_r=0.50 (1338s)
+150 updates (182 skipped) loss=1.313 mean_r=0.50 (2128s)
+200 updates (230 skipped) loss=41.168 mean_r=-0.12 (2707s)
+/workspace/mrt_shot.sh: line 6: 10681 Killed                  PYTHONPATH=src python scripts/mrt_finetune.py --ckpt v6c_ema --out v6c_mrt --n 1500 --k 4 --alpha 0.5 --lr 2e-5
+=== Thu Aug 20 11:49:17 UTC 2026 MRT done, re-scoring ===
+MRT_SHOT_COMPLETE Thu Aug 20 11:49:19 UTC 2026
+== /workspace/final_mrt_mobile-actions.log
+== /workspace/final_mrt_seal-tools-in.log
+== /workspace/final_mrt_seal-tools-out.log
+=== Thu Aug 20 11:49:52 UTC 2026 MRT retry: lr=5e-6 (4x lower), auto-abort on divergence ===
+RLOO fine-tune: 1500 rows (70% multi-call), k=4
+50 updates (60 skipped) loss=6.181 mean_r=0.58 (667s)
+WATCHDOG: divergence detected, aborting MRT retry Thu Aug 20 12:01:52 UTC 2026
+/workspace/mrt_shot2.sh: line 18: 11141 Killed                  PYTHONPATH=src python scripts/mrt_finetune.py --ckpt v6c_ema --out v6c_mrt --n 1500 --k 4 --alpha 0.5 --lr 5e-6
+MRT_ABANDONED Thu Aug 20 12:01:52 UTC 2026
+=== Thu Aug 20 12:18:46 UTC 2026 MRT final attempt: lr=5e-6, watchdog on mean_r<0.30 x2 or loss>20 ===
+RLOO fine-tune: 1500 rows (70% multi-call), k=4
+50 updates (60 skipped) loss=6.181 mean_r=0.58 (652s)
+100 updates (99 skipped) loss=-0.822 mean_r=0.45 (1177s)
+150 updates (142 skipped) loss=0.476 mean_r=0.58 (1914s)
+200 updates (185 skipped) loss=0.012 mean_r=0.45 (2542s)
+250 updates (229 skipped) loss=1.138 mean_r=0.38 (3211s)
+300 updates (282 skipped) loss=2.303 mean_r=0.56 (3988s)
+350 updates (339 skipped) loss=-0.252 mean_r=0.88 (4769s)
+400 updates (398 skipped) loss=-0.016 mean_r=0.83 (5529s)
+450 updates (470 skipped) loss=-1.354 mean_r=0.58 (6464s)
+500 updates (521 skipped) loss=12.058 mean_r=0.62 (7215s)
+550 updates (578 skipped) loss=-0.802 mean_r=0.92 (7914s)
+600 updates (644 skipped) loss=1.656 mean_r=0.17 (8603s)
+650 updates (705 skipped) loss=1.503 mean_r=0.13 (9343s)
+WATCHDOG: real divergence, aborting Thu Aug 20 14:54:47 UTC 2026
+/workspace/mrt_shot3.sh: line 16: 11403 Killed                  PYTHONPATH=src python scripts/mrt_finetune.py --ckpt v6c_ema --out v6c_mrt --n 1500 --k 4 --alpha 0.5 --lr 5e-6
+MRT_ABANDONED_FINAL Thu Aug 20 14:54:47 UTC 2026

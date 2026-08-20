@@ -1,0 +1,3 @@
+mobile-actions   ungated          accuracy=0.840  name_acc=0.994  well_formed=1.000  non_empty=1.000  one_call=0.892  two_plus=0.735  refuse=0.000
+mobile-actions   gated            accuracy=0.840  name_acc=0.994  well_formed=1.000  non_empty=1.000  one_call=0.892  two_plus=0.735  refuse=0.000
+mobile-actions   gated_heads_off  accuracy=0.840  name_acc=0.994  well_formed=1.000  non_empty=1.000  one_call=0.892  two_plus=0.735  refuse=0.000
