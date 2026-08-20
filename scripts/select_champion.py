@@ -59,6 +59,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt-dir", default="checkpoints/pulls")
     ap.add_argument("--dev-rows", type=int, default=5000)
+    ap.add_argument("--runs", nargs="+", default=["v5:A", "v5rft:B"],
+                    help="run:subdir pairs, e.g. v6c:A v6s:B")
     a = ap.parse_args()
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -72,7 +74,8 @@ def main() -> None:
 
     cand: dict[str, ToolTransformer] = {}
     base = ROOT / a.ckpt_dir
-    for run, sub in (("v5", "A"), ("v5rft", "B")):
+    for spec in a.runs:
+        run, sub = spec.split(":")
         variants = {f"{run}": base / sub / f"{run}.pt",
                     f"{run}_devbest": base / sub / f"{run}_devbest.pt",
                     f"{run}_ema": base / sub / f"{run}_ema.pt"}

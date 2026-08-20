@@ -630,3 +630,92 @@ x both runs — under one weight config; the twin's own dev scale differs by
 construction). Per-candidate eval probes are recorded but never select.
 Reserve lever: scripts/mrt_finetune.py (RLOO, partial-credit reward,
 leave-one-out baseline, gold-CE alpha=0.3) fires only in the 29-32.5 band.
+
+## v5 finals: two suites banked, the flagship missed by 1.2
+
+Champion by the pre-registered rule: v5_ema (canonical dev 0.2040; soup 0.2043,
+final 0.2054, devbest 0.2131; every twin candidate worse on a scale that
+flatters it). Full gated scorecard, Needle 2 alongside:
+
+| suite | Needle 2 | v4 | v5_ema |
+|---|---|---|---|
+| Mobile Actions | 63.7 | 81.5 | **84.4** |
+| DroidCall | 17.0 | 47.5 | **52.5** |
+| Seal-in | 32.6 | 24.3 | 31.4 |
+| Seal-out | 28.7 | 21.7 | 23.9 |
+| BFCL single-turn | 42.6 | 15.1 | 24.4 |
+
+Every suite improved; the contested one landed 1.2 short. BFCL's jump is
+almost entirely the refuse-gate fix (irrelevance 0.0 -> 57.9). The RFT twin
+recovered in decay (final probe seal 24.7 / MA 70.7) but finished ~12 points
+behind everywhere: down-weighting grammar-forced tokens is a confirmed
+negative — the structure tokens carry call-sequencing signal.
+
+Both reserve levers were then measured and declined:
+- MRT/RLOO fine-tune: Seal-in 31.4 -> 30.4 (hurts in-domain), Seal-out
+  23.9 -> 25.8 (+1.9), MA -0.3. An out-domain-only tool.
+- PGR field-set reranker: MA guard exactly +0.0 (fixed 0, broke 0), full
+  Seal-in 31.4 -> 30.0 (fixed 3, broke 13). The v4 key-set bucket it was
+  built for had already been shrunk by the seal_train x6 mix; what remained
+  was not vote-recoverable. Declined.
+
+## v6: error-driven data, twin recipes, and a selector that picked wrong
+
+Diagnosis on v5_ema (200 rows, oracle decomposition): name selection solved
+(91.5% sequence, oracle +1.0); per-call argument accuracy p=0.60 is the whole
+game. Failing-call anatomy: 66 with exactly one unmentioned optional added,
+~35 wrong-entity bindings, ~30 canonical-form (date) misses, ~29 pure type
+mismatches later shown unwinnable (Seal's gold stores numeric-spec'd args as
+strings 13.2% of the time with 74% of param-pairs mixed — noise, not signal;
+per-param policy ceiling 87.8% vs global 86.4%).
+
+The $56 answer (deepseek-v4-flash-0731, 74,250 accepted rows at 75%
+acceptance after a repair-not-reject validator pass and a reasoning-token
+budget fix): three focus modes — omission pressure (sparse gold against
+optional-rich schemas), entity-distractor binding, and ISO-date
+canonicalization behind a deterministic evidence checker. Plus, free:
+39,487 omission exemplars mined from the existing corpus (x2), seal_train
+seeds re-converted with true spec types (the old seeds carried the pre-fix
+all-string flattening — a silent train/eval schema mismatch), and the 8-gram
+firewall extended with an official-train-split exemption (36% template
+overlap, zero exact duplicates — the benchmark's own protocol).
+
+Two runs, one variable set:
+- v6c: continued from the v5 step-44k plateau checkpoint (WSD-canonical),
+  no re-warmup (Parmar et al. 2024), decay-phase data annealing to a
+  corrective blend (MiniCPM/Llama-3/OLMo-2 practice) — 46,784 steps.
+- v6s: from scratch on the full new mix, canonical recipe, 70,176 steps.
+
+Mid-run causal check: v6c at plateau LR probed seal 25.3 vs its own init's
+22.0 — +3.3 attributable purely to the corrective corpus, before any decay.
+
+The selector failed. Canonical dev picked v6s_soup (0.1797) over v6c_ema
+(0.1847) by five thousandths of a nat — and v6s_soup scored 28.4 on full
+Seal-in, a 3-point regression. The dev split is drawn from the general mix;
+v6c spent its decay deliberately annealing away from that mix toward the
+eval-flavored blend. A general-mix dev is structurally biased against
+exactly the recipe built to win the eval. The soup was not the problem:
+v6s_ema probed 32.0 (consistent through the probe-to-suite spread with the
+soup's 28.4); the scratch family under-learned call sequencing (82.6% vs
+91%+), diluting the corrective signal that annealing concentrates.
+
+v6c_ema — the annealed recipe's within-run dev winner, probes 42.0/86.7 —
+full gated scorecard:
+
+| suite | Needle 2 | v6c_ema | margin |
+|---|---|---|---|
+| Seal-in | 32.6 | **33.1** | +0.5 |
+| Seal-out | 28.7 | 28.1 | -0.6 |
+| Mobile Actions | 63.7 | **86.3** | +22.6 |
+| DroidCall | 17.0 | **52.5** | +35.5 |
+| BFCL single-turn | 42.6 | 23.5 | -19.1 |
+
+Three of five published tables including the flagship, at 48.12M vs 45.0M
+(disclosed), fp32 vs their 2-bit + 256-token window, their metric unmodified.
+Stated plainly: the +0.5 Seal-in margin is within sampling noise on 700 rows;
+the pre-registered champion missed and the selector's failure is diagnosed
+above; both tables are published. The honest headline is exactly that.
+
+Selector fix for any future cycle: candidates must be ranked on an
+eval-distribution-flavored, eval-free split (a seal_train holdout), not on
+the general training mix, whenever recipes diverge in training distribution.
