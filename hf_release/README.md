@@ -76,9 +76,13 @@ out, at 48M parameters.
 
 It does not converse, reason, or write prose — it was never trained to. It reads
 a catalog of typed functions and a request, and returns the calls to make or an
-empty list when nothing fits. That narrowness is the point: the whole job fits in
-48M parameters, small enough that specializing it to one API surface is routine
-rather than a project.
+empty list when nothing fits.
+
+That narrowness is the design, not a limitation of it. The tokenizer, the
+training loss, and the decoder are all built around the same five decisions, so
+the model is never asked to spend capacity on JSON it will never emit. The whole
+job then fits in 48M parameters — small enough that specializing it to one API
+surface is routine rather than a project.
 
 [**GitHub — code, adaptation loop, full experimental record**](https://github.com/nikshepsvn/thimble) · MIT · 48.12M params · 768-token context
 
@@ -179,37 +183,103 @@ Two things about that recipe are load-bearing, both measured rather than assumed
 scratch and 33.1 annealed into the LR-decay phase. **Keep the guard data** —
 annealing purely on your catalog trades away the competence you are building on.
 
+Needs `OPENROUTER_API_KEY` for synthesis and a GPU to train. For scale, the v6
+cycle synthesized 74,250 validated rows for $56.
+
 `adapt.py` wires together exactly the machinery that produced the v6 result, but
 no third-party catalog has been adapted and published yet. The recipe is
 measured; the ergonomics are new.
 
-## How it was built
+## How it works
 
-**1. Tool calling is five decisions, not a generation problem.** A grammar
-compiled from the tool schemas force-feeds all JSON structure — braces, quotes,
-and every argument key. The model is consulted at exactly five choice points:
-*refuse or call · which tool · include this optional? · what value · stop or
-continue*. Malformed JSON, hallucinated parameter names, and calls to
-nonexistent tools are **unreachable, not unlikely**. At 48M parameters, capacity
-spent learning that `{` follows `[` is capacity wasted.
+Most constrained-decoding systems bolt a grammar onto a model trained to generate
+free text, then manage the mismatch. Here the **tokenizer, the training loss, and
+the decoder are one design**, built around the same five decision points:
+refuse-or-call, which tool, include this optional, what value, stop or continue.
 
-Measured honestly, the grammar is a *reliability* mechanism rather than an
-accuracy one — on Mobile Actions, free generation and constrained decoding agree
-on 150 of 150 rows. What it buys is that the worst failure modes cannot be
-expressed at all.
+**The tokenizer is built for the grammar.** JSON structural characters — and
+digits — are singleton tokens. Structure can therefore be force-fed *exactly*,
+with no token-healing and no ambiguity about where a constraint lands. The usual
+arrangement masks logits over a vocabulary that merged `",` into a single token
+and papers over the seam. Digits never merge either, so a copied number tokenizes
+the same way every time; the rebuild was verified by a fragmentation gate
+(word-value fragmentation 2.72 → 2.34 tokens/word, digits lengthening by design).
+It shipped as part of the v4 → v5 bundle that took name-sequence accuracy from
+80.4% to 91.5% — that bundle also added 350k corpus rows and reweighted the mix,
+so the tokenizer's own share of the gain was never isolated.
 
-**2. Every training example earns its place.** Row accuracy factors as
-`P(name sequence) × pⁿ`. Each version measured which factor was binding and
-attacked only that. The final data round was synthesized directly against the
-previous model's diagnosed failure buckets — spurious optional arguments,
-wrong-slot entity binding, date canonicalization — with a mid-training causal
-check (+3.3 points at constant LR, attributable to the corrective data alone).
+**The loss is weighted by those same five decisions** — structure 1x, keys 1.5x,
+names 2x, values 4x, stop-decision 6x — matched to the measured error
+distribution. The model is optimized for the choices it will be asked to make,
+not for tokens it will never emit.
 
-**3. Anneal, don't retrain.** A controlled twin experiment: the corrective
-corpus fed from scratch *diluted* (28.4); the same corpus **annealed into the
-learning-rate decay phase** of a continued run *concentrated* (33.1). The decay
-phase is where a WSD-trained model crystallizes — that is where the good data
-belongs. This is probably the most portable result in the project.
+**The decoder consults the model only at those points.** Everything else is
+determined before it runs, which is where the contract above comes
+from.
+
+### Evidence the co-design works
+
+Two measurements that look like caveats in isolation are the proof in context.
+
+**There is no projection tax.** The same rows decoded with the grammar and with
+no grammar at all (`scripts/draft_vs_constrained.py`):
+
+| suite | free generation | grammar-constrained |
+|---|---|---|
+| Mobile Actions (150) | 78.7 | 78.7 |
+| Seal-Tools in (150) | 26.7 | 28.0 |
+
+On Mobile Actions the two agree on **150 of 150 rows**. The grammar is not
+overriding the model — the model already wants what the grammar enforces. A
+bolted-on grammar produces disagreement and a tax to recover; this is why
+draft-then-constrain (DCCD) had nothing to recover here and was abandoned.
+
+Stated plainly, because the distinction matters: the grammar buys *reliability*,
+not accuracy. "Constrained decoding makes the model correct" would be a different
+claim and not one this data supports. What it buys is that the worst failure
+modes cannot be expressed, plus parseability on the ~11% of Seal rows where free
+generation emits invalid JSON.
+
+**And the co-design is load-bearing, not decorative.** Down-weighting the
+grammar-forced tokens in the loss — on the theory that the model need not learn
+what the decoder will supply — cost **12 points** in a controlled twin run. Those
+tokens carry the call-sequencing signal: the model learns *when a call ends*
+through structure it never has to emit. Remove them and it breaks.
+
+### The rest of the stack
+
+- **Retriever** — `retrieve(query, tools, emitted=...)`, a DTDR-style
+  (arXiv 2512.17052) refresh conditioned on the *partial plan*, so the candidate
+  set is recomputed after each emitted call rather than once per request.
+- **Name head** — a bilinear readout scoring candidate tool-name spans in the
+  prompt against the hidden state at the decision position. Selection is treated
+  as pointing at the prompt, not generating from a vocabulary, following "Looking
+  Is Not Picking" (arXiv 2606.16364): mis-selection is a readout failure, not a
+  perception one. Its only positive result was on *unfamiliar* catalogs (+2.2),
+  which is why it is on by default for your own tools.
+- **Trunk** — deep-thin and gated: d=448, 20 layers, GQA 8/4, SwiGLU x2.0,
+  QK-norm, sandwich RMSNorm, tied embeddings, Muon on 2D weights and AdamW on
+  embeddings, norms and heads. This part is standard modern practice and is not
+  where the advantage is; a controlled study from the Needle authors
+  (arXiv 2607.18363) finds architecture choices at this scale worth hundredths of
+  a nat at matched parameters. The co-design above is the part that matters.
+
+### How the model was built
+
+Row accuracy factors as `P(name sequence) x p^n`, where `p` is per-call argument
+accuracy. Each version measured which factor was binding and attacked only that:
+
+| version | name seq | p | Seal-in | what changed |
+|---|---|---|---|---|
+| v4 | 80.4% | 0.593 | 24.3 | baseline |
+| v5 | 91.5% | 0.60 | 31.4 | 16k digit-singleton tokenizer, +350k corpus rows, seal_train x6, dev-selected EMA |
+| **v6** | ~92% | ~0.66 | **33.1** | error-driven synth against three measured failure buckets, annealed into the decay phase |
+
+The v6 data round came straight from the v5 diagnostic: of 193 failing calls, 66
+added exactly one unmentioned optional, ~35 bound the wrong entity, ~30 missed
+canonical date forms, ~29 were unwinnable noise in the gold. Mid-run causal
+check: **+3.3 points at constant LR** from the corrective corpus alone. That loop
+is what `adapt.py` automates for your catalog.
 
 ## What didn't work (measured, not guessed)
 

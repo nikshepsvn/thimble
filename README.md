@@ -5,9 +5,13 @@ out, at 48M parameters.
 
 It does not converse, reason, or write prose — it was never trained to. It reads
 a catalog of typed functions and a request, and returns the calls to make or an
-empty list when nothing fits. That narrowness is the point: the whole job fits in
-48M parameters, small enough that specializing it to one API surface is routine
-rather than a project.
+empty list when nothing fits.
+
+That narrowness is the design, not a limitation of it. The tokenizer, the
+training loss, and the decoder are all built around the same five decisions, so
+the model is never asked to spend capacity on JSON it will never emit. The whole
+job then fits in 48M parameters — small enough that specializing it to one API
+surface is routine rather than a project.
 
 **[Model](https://huggingface.co/flashvenom/thimble)** ·
 [Findings](FINDINGS.md) · [Experimental record](RESULTS.md) · MIT · ~$260 to build
@@ -157,42 +161,77 @@ it, the numbers are worth a pull request.
 
 ## How it works
 
-A deep-thin gated trunk (d=448, 20 layers, GQA 8/4, SwiGLU x2.0, QK-norm,
-sandwich RMSNorm, tied embeddings) plus three factorized capabilities:
+Most constrained-decoding systems bolt a grammar onto a model trained to generate
+free text, then manage the mismatch. Here the **tokenizer, the training loss, and
+the decoder are one design**, built around the same five decision points:
+refuse-or-call, which tool, include this optional, what value, stop or continue.
 
-1. **Retriever** — `retrieve(query, tools, emitted=...)`, a DTDR-style
-   (arXiv 2512.17052) refresh conditioned on the *partial plan*, so the candidate
-   set is recomputed after each emitted call.
-2. **Name head** — a bilinear readout scoring candidate tool-name spans in the
-   prompt against the hidden state at the decision position, motivated by
-   "Looking Is Not Picking" (arXiv 2606.16364): mis-selection is a readout
-   failure, not a perception one. Its only positive result was on *unfamiliar*
-   catalogs (+2.2), which is why it is on by default for your own tools.
-3. **Grammar decoder** — the tokenizer keeps JSON structural characters as
-   singleton tokens, so structure is force-fed exactly and the model is consulted
-   only at the five choice points that produce the contract above.
+**The tokenizer is built for the grammar.** JSON structural characters — and
+digits — are singleton tokens. Structure can therefore be force-fed *exactly*,
+with no token-healing and no ambiguity about where a constraint lands. The usual
+arrangement masks logits over a vocabulary that merged `",` into a single token
+and papers over the seam. Digits never merge either, so a copied number tokenizes
+the same way every time; the rebuild was verified by a fragmentation gate
+(word-value fragmentation 2.72 → 2.34 tokens/word, digits lengthening by design).
+It shipped as part of the v4 → v5 bundle that took name-sequence accuracy from
+80.4% to 91.5% — that bundle also added 350k corpus rows and reweighted the mix,
+so the tokenizer's own share of the gain was never isolated.
 
-Training is weighted cross-entropy matched to the observed error distribution
-(structure 1x, keys 1.5x, names 2x, values 4x, stop decision 6x) plus a name-head
-auxiliary loss, with Muon on trunk 2D weights and AdamW on embeddings, norms and
-heads.
+**The loss is weighted by those same five decisions** — structure 1x, keys 1.5x,
+names 2x, values 4x, stop-decision 6x — matched to the measured error
+distribution. The model is optimized for the choices it will be asked to make,
+not for tokens it will never emit.
 
-### What the grammar actually buys
+**The decoder consults the model only at those points.** Everything else is
+determined before it runs, which is where [the contract](#the-contract) comes
+from.
 
-Measured, not assumed. The same rows decoded with the grammar and with no grammar
-at all (`scripts/draft_vs_constrained.py`):
+### Evidence the co-design works
+
+Two measurements that look like caveats in isolation are the proof in context.
+
+**There is no projection tax.** The same rows decoded with the grammar and with
+no grammar at all (`scripts/draft_vs_constrained.py`):
 
 | suite | free generation | grammar-constrained |
 |---|---|---|
 | Mobile Actions (150) | 78.7 | 78.7 |
 | Seal-Tools in (150) | 26.7 | 28.0 |
 
-On Mobile Actions the two agree on **150 of 150 rows**. The grammar is a
-*reliability* mechanism, not an accuracy one — which is exactly why the contract
-is stated separately from the numbers. It buys unconditional well-formedness and
-parseability on the ~11% of Seal rows where free generation emits invalid JSON.
-"Constrained decoding makes the model correct" would be a different claim, and
-not one this data supports.
+On Mobile Actions the two agree on **150 of 150 rows**. The grammar is not
+overriding the model — the model already wants what the grammar enforces. A
+bolted-on grammar produces disagreement and a tax to recover; this is why
+draft-then-constrain (DCCD) had nothing to recover here and was abandoned.
+
+Stated plainly, because the distinction matters: the grammar buys *reliability*,
+not accuracy. "Constrained decoding makes the model correct" would be a different
+claim and not one this data supports. What it buys is that the worst failure
+modes cannot be expressed, plus parseability on the ~11% of Seal rows where free
+generation emits invalid JSON.
+
+**And the co-design is load-bearing, not decorative.** Down-weighting the
+grammar-forced tokens in the loss — on the theory that the model need not learn
+what the decoder will supply — cost **12 points** in a controlled twin run. Those
+tokens carry the call-sequencing signal: the model learns *when a call ends*
+through structure it never has to emit. Remove them and it breaks.
+
+### The rest of the stack
+
+- **Retriever** — `retrieve(query, tools, emitted=...)`, a DTDR-style
+  (arXiv 2512.17052) refresh conditioned on the *partial plan*, so the candidate
+  set is recomputed after each emitted call rather than once per request.
+- **Name head** — a bilinear readout scoring candidate tool-name spans in the
+  prompt against the hidden state at the decision position. Selection is treated
+  as pointing at the prompt, not generating from a vocabulary, following "Looking
+  Is Not Picking" (arXiv 2606.16364): mis-selection is a readout failure, not a
+  perception one. Its only positive result was on *unfamiliar* catalogs (+2.2),
+  which is why it is on by default for your own tools.
+- **Trunk** — deep-thin and gated: d=448, 20 layers, GQA 8/4, SwiGLU x2.0,
+  QK-norm, sandwich RMSNorm, tied embeddings, Muon on 2D weights and AdamW on
+  embeddings, norms and heads. This part is standard modern practice and is not
+  where the advantage is; a controlled study from the Needle authors
+  (arXiv 2607.18363) finds architecture choices at this scale worth hundredths of
+  a nat at matched parameters. The co-design above is the part that matters.
 
 ### How the model was built
 
