@@ -1,7 +1,23 @@
+<div align="center">
+
 # 🧵 Thimble
 
-**A tool-calling layer, not a language model.** Your schemas in, validated calls
-out, at 48M parameters.
+### A tool-calling layer, not a language model.
+
+**Your schemas in, validated calls out, at 48M parameters.**
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-1f6feb?style=flat-square)](LICENSE)
+[![Model on Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20model-thimble--v6-ffcc4d?style=flat-square)](https://huggingface.co/flashvenom/thimble)
+[![Parameters](https://img.shields.io/badge/params-48.12M-c8324c?style=flat-square)](#numbers)
+[![Well-formed JSON](https://img.shields.io/badge/well--formed%20JSON-100%25%20by%20construction-2ea043?style=flat-square)](#the-contract)
+[![Build cost](https://img.shields.io/badge/total%20build%20cost-%24260-8957e5?style=flat-square)](REPRODUCING.md)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/results-dark.png">
+  <img alt="Accuracy by suite, split by whether the tool catalog appeared in training" src="assets/results-light.png" width="100%">
+</picture>
+
+</div>
 
 It does not converse, reason, or write prose — it was never trained to. It reads
 a catalog of typed functions and a request, and returns the calls to make or an
@@ -12,11 +28,6 @@ training loss, and the decoder are all built around the same five decisions, so
 the model is never asked to spend capacity on JSON it will never emit. The whole
 job then fits in 48M parameters — small enough that specializing it to one API
 surface is routine rather than a project.
-
-**[Model](https://huggingface.co/flashvenom/thimble)** ·
-[Findings](FINDINGS.md) · [Experimental record](RESULTS.md) · MIT · ~$260 to build
-
-![Results](assets/results.png)
 
 ## The contract
 
@@ -119,9 +130,17 @@ has a scale.
 | Seal-Tools out-of-domain (654) | 28.1 | 28.7 |
 | BFCL v4 single-turn (3,641) | 23.5 | 42.6 |
 
-The spread between those tables is visible *inside a single suite*: Seal-Tools
-in-domain 33.1 against out-of-domain 28.1, same model, same metric, only the
-catalogs changed. Name-sequence accuracy tracks it exactly, 88% against 79%.
+The spread between those tables is visible *inside a single suite* — the cleanest
+control in the project, because only one variable moves:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/catalog-control-dark.png">
+  <img alt="Seal-Tools in-domain vs out-of-domain: row accuracy 33.1 vs 28.1, tool-name sequence 88.0 vs 79.0" src="assets/catalog-control-light.png" width="88%">
+</picture>
+
+Name-sequence accuracy tracks row accuracy exactly. The model is not failing to
+extract arguments on unfamiliar catalogs — it is failing to pick the right
+function.
 
 **Disclosures.** Mobile Actions' public train split (8,693 rows, disjoint from
 eval) is in the training mix — that is what the first table's heading means.
@@ -250,7 +269,9 @@ what the decoder will supply — cost **12 points** in a controlled twin run. Th
 tokens carry the call-sequencing signal: the model learns *when a call ends*
 through structure it never has to emit. Remove them and it breaks.
 
-### The rest of the stack
+<details>
+<summary><b>The rest of the stack — retriever, name head, trunk</b></summary>
+
 
 - **Retriever** — `retrieve(query, tools, emitted=...)`, a DTDR-style
   (arXiv 2512.17052) refresh conditioned on the *partial plan*, so the candidate
@@ -268,7 +289,11 @@ through structure it never has to emit. Remove them and it breaks.
   (arXiv 2607.18363) finds architecture choices at this scale worth hundredths of
   a nat at matched parameters. The co-design above is the part that matters.
 
-### How the model was built
+</details>
+
+<details>
+<summary><b>How the model was built — the error-driven data loop</b></summary>
+
 
 Row accuracy factors as `P(name sequence) x p^n`, where `p` is per-call argument
 accuracy. Each version measured which factor was binding and attacked only that:
@@ -284,6 +309,8 @@ added exactly one unmentioned optional, ~35 bound the wrong entity, ~30 missed
 canonical date forms, ~29 were unwinnable noise in the gold. Mid-run causal
 check: **+3.3 points at constant LR** from the corrective corpus alone. That loop
 is what `adapt.py` automates for your catalog.
+
+</details>
 
 ## What did not work
 

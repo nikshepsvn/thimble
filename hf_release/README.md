@@ -71,8 +71,16 @@ model-index:
 ---
 # 🧵 Thimble
 
-**A tool-calling layer, not a language model.** Your schemas in, validated calls
-out, at 48M parameters.
+### A tool-calling layer, not a language model.
+
+**Your schemas in, validated calls out, at 48M parameters.**
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-1f6feb?style=flat-square)](https://github.com/nikshepsvn/thimble/blob/master/LICENSE)
+[![Code](https://img.shields.io/badge/GitHub-code%20%26%20adaptation%20loop-24292f?style=flat-square&logo=github)](https://github.com/nikshepsvn/thimble)
+[![Parameters](https://img.shields.io/badge/params-48.12M-c8324c?style=flat-square)](#numbers)
+[![Well-formed JSON](https://img.shields.io/badge/well--formed%20JSON-100%25%20by%20construction-2ea043?style=flat-square)](#the-contract)
+
+![Accuracy by suite, split by whether the tool catalog appeared in training](results-light.png)
 
 It does not converse, reason, or write prose — it was never trained to. It reads
 a catalog of typed functions and a request, and returns the calls to make or an
@@ -83,10 +91,6 @@ training loss, and the decoder are all built around the same five decisions, so
 the model is never asked to spend capacity on JSON it will never emit. The whole
 job then fits in 48M parameters — small enough that specializing it to one API
 surface is routine rather than a project.
-
-[**GitHub — code, adaptation loop, full experimental record**](https://github.com/nikshepsvn/thimble) · MIT · 48.12M params · 768-token context
-
-![Results](results.png)
 
 ## The contract
 
@@ -148,9 +152,13 @@ metric, so the left column has a scale.
 | Seal-Tools out-of-domain (654) | 28.1 | 28.7 |
 | BFCL v4 single-turn (3,641) | 23.5 | 42.6 |
 
-The spread is visible *inside a single suite*: Seal-Tools in-domain 33.1 against
-out-of-domain 28.1, same model, same metric, only the catalogs changed.
-Name-sequence accuracy tracks it exactly, 88% against 79%.
+The spread is visible *inside a single suite* — the cleanest control in the
+project, because only one variable moves:
+
+![Seal-Tools in-domain vs out-of-domain](catalog-control-light.png)
+
+Name-sequence accuracy tracks row accuracy exactly. The model is not failing to
+extract arguments on unfamiliar catalogs — it is failing to pick the right function.
 
 **Disclosures.** Mobile Actions' public train split (8,693 rows, disjoint from
 eval) is in the training mix — that is what the first table's heading means. The
