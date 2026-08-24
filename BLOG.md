@@ -1,82 +1,75 @@
-# Beating a 153B-token model on its own benchmark with $260 and a spreadsheet of failures
+# Tool calling is five decisions, not a generation problem
 
-Two weeks ago Cactus released [Needle 2](https://cactuscompute.com/needle), a
-45M-parameter tool-calling model that fits in 14MB and runs on a microcontroller.
-It trained on 153 billion tokens. It scores 32.6% on Seal-Tools, the strict
-exact-match suite its evaluation is built around, 63.7% on Google's Mobile
-Actions, and it is very good.
+*Building a 48M-parameter tool-caller for $260, and measuring the exact point
+where small stops working.*
 
-We built a 48M model that saw about 1 billion tokens — 150x less — and beats it
-on three of its five published tables, under its own metric, unmodified:
+Most tool-calling models are language models that write JSON. This one is a
+language model that makes five decisions, with the JSON assembled around it by a
+compiler. That change is most of the result.
 
-| Suite | ours | Needle 2 |
-|---|---|---|
-| **Seal-Tools in-domain** | **33.1** | 32.6 |
-| **Mobile Actions** | **86.3** | 63.7 |
-| **DroidCall** | **52.5** | 17.0 |
-| Seal-Tools out-of-domain | 28.1 | **28.7** |
-| BFCL single-turn | 23.5 | **42.6** |
+The claim I'd defend: **calling tools against a catalog you control is a
+structured extraction problem, not a reasoning problem, and it fits in 48M
+parameters.** On a real app-intent catalog it reaches 86.3% ordered strict exact
+match — every function name, the call order, and every argument value correct —
+and it cannot emit malformed JSON or invent a parameter name.
 
-The Seal margin is inside sampling noise and we say so. BFCL is not close and we
-say that too — their 153B tokens buy a breadth our corpus deliberately traded
-away, and the last section is about exactly where that boundary sits. Total
-spend across every experiment, every failed idea, and every GPU-hour: about
-$260. The winning cycle alone: $85.
+The claim I wouldn't: that this generalizes. Off a familiar catalog it degrades
+sharply, and the last section is about exactly how sharply and why. That
+boundary is the most useful thing here, so it gets a section rather than a
+footnote.
 
-This post is about the two ideas that did the work: a decoder that only asks the
-model five questions, and a data pipeline that only feeds it measured failures.
-
-## Tool calling is five decisions, not a generation problem
-
-Most tool-calling models are language models that write JSON. Ours is a language
-model that makes five decisions, with the JSON assembled around it by a compiler.
+## Five decisions
 
 Given a query and a catalog of typed functions, something has to decide:
 (1) does any tool apply, (2) which one, (3) which optional arguments are
 licensed by the query, (4) what values go in them, (5) is another call needed.
-Every other token — braces, quotes, commas, and critically *every argument
-key* — is determined by the schema before the model runs.
+Every other token — braces, quotes, commas, and critically *every argument key* —
+is determined by the schema before the model runs.
 
 A model that generates JSON as text spends capacity learning that `{` follows
-`[`. At 45M parameters you cannot afford that. So a grammar compiled from the
+`[`. At 48M parameters you cannot afford that. So a grammar compiled from the
 declared schemas force-feeds all structure, and the model is consulted only at
 the five choice points. Malformed JSON, invented argument names, and calls to
 nonexistent tools become unreachable rather than unlikely: 100% well-formed
-output, by construction, against their 93.4%.
+output, by construction.
 
 Measured honestly, the grammar is a *reliability* mechanism, not an accuracy
 one — on Mobile Actions, free generation and constrained decoding agree on 150
-of 150 rows. What it buys is that the worst failure modes cannot be expressed.
+of 150 rows. It is worth being precise about this, because "constrained decoding
+makes the model correct" is a claim people make and it is not the one the data
+supports. What the grammar buys is that the worst failure modes cannot be
+expressed at all, plus parseability on the ~11% of Seal-Tools rows where free
+generation emits invalid JSON.
 
 ## The equation that ran the project
 
-Strict exact match factors cleanly: row accuracy = P(name sequence) x p^n,
-where p is per-call argument accuracy and n the number of calls. That equation
-was the project's management structure. Each cycle: measure both factors,
-diagnose the binding one, attack only that, re-measure.
+Strict exact match factors cleanly: row accuracy = P(name sequence) × pⁿ, where
+p is per-call argument accuracy and n the number of calls. That equation was the
+project's management structure. Each cycle: measure both factors, diagnose the
+binding one, attack only that, re-measure.
 
-- **v4** (24.3 on Seal): name sequencing 80%, p=0.59. Both weak.
+- **v4** (24.3 on Seal-Tools): name sequencing 80%, p = 0.59. Both weak.
 - **v5** (31.4): a rebuilt 16k tokenizer with digits as singletons, 350k new
-  corpus rows, and the eval-twin train split upweighted 6x. Name sequencing
-  91.5% — solved. p barely moved. 1.2 points short.
+  corpus rows, and the eval-twin train split upweighted 6×. Name sequencing
+  91.5% — solved. p barely moved.
 - **v6** (33.1): nothing but p, attacked bucket by bucket.
 
 The v5 failure diagnostic said: of 193 failing calls, 66 added exactly one
 optional argument the query never mentioned, ~35 bound the right value to the
 wrong slot, ~30 missed a canonical date format, and ~29 were unwinnable — the
 benchmark's own gold stores numeric-typed arguments as strings 13% of the time,
-with 74% of parameters inconsistent about it. (We measured the ceiling of any
-typing policy: 87.8%. Needle eats the same noise. We stopped chasing it.)
+with 74% of parameters inconsistent about it. We measured the ceiling of any
+typing policy at 87.8% against 86.4% for a global rule, called it noise, and
+stopped chasing it.
 
-So the v6 data round was three synthesis modes aimed at three buckets:
-schemas rich in optionals where the gold uses only the mentioned ones; queries
-carrying two dates or two amounts that must land in different slots; natural
-language dates that the call must render as ISO — behind a deterministic
-checker so the evidence rule never loosens. $56 of a cheap teacher model,
-74,250 validated rows, plus 39k omission exemplars mined for free from the
-corpus we already had. A mid-training probe made the causality clean: +3.3
-Seal points at constant learning rate, before any decay, attributable to
-nothing but the corrective data.
+So the v6 data round was three synthesis modes aimed at three buckets: schemas
+rich in optionals where the gold uses only the mentioned ones; queries carrying
+two dates or two amounts that must land in different slots; natural-language
+dates that the call must render as ISO — behind a deterministic checker so the
+evidence rule never loosens. $56 of a cheap teacher model, 74,250 validated rows,
+plus 39k omission exemplars mined for free from the corpus we already had. A
+mid-training probe made the causality clean: **+3.3 points at constant learning
+rate**, before any decay, attributable to nothing but the corrective data.
 
 ## Anneal, don't retrain — and pick your judge carefully
 
@@ -84,55 +77,95 @@ We trained twins on the new corpus. One from scratch. One resumed from the old
 model's plateau checkpoint, with the training data *switched to a
 corrective-heavy blend during the learning-rate decay* — the phase where a
 WSD-trained model crystallizes. The literature (MiniCPM, Llama 3, OLMo 2)
-recommends this; now we have a controlled reading of why.
+recommends this; now there is a controlled reading of why.
 
-The scratch twin got the better validation loss — and scored 28.4 on Seal, a
-three-point regression. The annealed twin scored 33.1. Same data, same
-architecture, same budget. Fed from step zero, corrective data dilutes into
-the average; annealed into a trained model during decay, it concentrates
-exactly where behavior sets.
+| | Seal-Tools in-domain |
+|---|---:|
+| from scratch on the corrective mix | 28.4 |
+| annealed into the LR-decay phase | **33.1** |
 
-Which produced our most instructive failure: the pre-registered champion
-selector — held-out loss on the general training mix — picked the scratch
-twin, by five thousandths of a nat. A general-mix dev set structurally
-penalizes a model that just annealed *away* from the general mix toward the
-target distribution. The selector was biased against the winning recipe by
-construction. Both models' full tables are published, the selection failure is
-documented, and the fix (rank candidates on an eval-flavored but eval-free
-split) is one line in the repo for the next cycle.
+Same data, same architecture, same budget. Fed from step zero, corrective data
+dilutes into the average; annealed into a trained model during decay, it
+concentrates exactly where behavior sets. If one thing here transfers to your
+project, it is this.
+
+Which produced the most instructive failure of the whole build: the
+pre-registered champion selector — held-out loss on the general training mix —
+picked the scratch twin, by five thousandths of a nat. A general-mix dev set
+structurally penalizes a model that just annealed *away* from the general mix
+toward the target distribution. The selector was biased against the winning
+recipe by construction. Both models' full tables are published, the failure is
+documented, and the fix — rank candidates on an eval-flavored but eval-free
+split — is one line for the next cycle.
 
 ## The graveyard is the moat
 
 The repo's RESULTS.md records every idea that died, with the measurement that
-killed it: span-copy heads (-30), pointer heads (-16), beam/RL search (oracle-
-capped below the target), draft-then-constrain (no tax to recover), down-
-weighting grammar-forced tokens (-12: structure tokens carry the sequencing
-signal), field-set reranking (-1.4: training had already eaten its lunch),
-RLOO fine-tuning on the annealed checkpoint (diverges at every learning rate —
-sharp minima and policy gradients do not mix). Two of those would have shipped
-on intuition. The discipline that nothing ships without an A/B on a suite it
-wasn't designed for is, as far as we can tell, the actual moat.
+killed it: span-copy heads (−30), pointer heads (−16), beam/RL search
+(oracle-capped below target), draft-then-constrain (no projection tax to
+recover), down-weighting grammar-forced tokens (−12: structure tokens carry the
+call-sequencing signal), field-set reranking (−1.4: training had already eaten
+its lunch), RLOO fine-tuning on the annealed checkpoint (diverges at every
+learning rate — sharp minima and policy gradients do not mix).
 
-What we could not engineer around: BFCL. Their 42.6 rests on breadth — Java
-and JavaScript schema dialects, values the query paraphrases instead of
-stating, open-domain coverage — that a 1B-token extractive corpus does not
-contain and a 48M model fed concentrate cannot infer. Needle proves 45M
-params can hold that number; matching it is a data-volume project (~$500 of
-GPU and tens of billions of broad tokens), not a cleverness project. That is
-the honest boundary of this result: concentration beats volume exactly where
-the test is narrow, and nowhere else.
+Two of those would have shipped on intuition. The pointer-head result is the one
+I'd flag for anyone building in this space: the head *learns*, its accuracy is
+real, and its confidence simply does not correlate with correctness — so gating
+on it costs 16 points. Pointer generators are independently reported to hurt
+structured extraction under grammar-constrained decoding in low-resource
+settings. The discipline that nothing ships without an A/B on a suite it wasn't
+designed for is, as far as I can tell, the actual moat.
+
+## Where it breaks
+
+The interesting half. Everything above describes a model operating on catalogs
+it has seen. Change that one variable and the result comes apart in a way that
+is measurable *inside a single benchmark*:
+
+| Seal-Tools, same model, same metric | |
+|---|---:|
+| in-domain catalogs | 33.1 |
+| out-of-domain catalogs | 28.1 |
+
+Name-sequence accuracy tracks it exactly: 88% in-domain, 79% out. Every
+out-of-domain deficit traces to that one number — the model is not failing to
+extract arguments, it is failing to pick the right function from an unfamiliar
+catalog.
+
+Push further out and it gets worse in specific, nameable ways. On BFCL v4
+single-turn the model scores 23.5. The breakdown says why, and it is not uniform
+weakness: `simple_python` 29.3, but `simple_java` 14.0 and `simple_javascript`
+8.0 — Java and JS schema dialects are simply absent from a deliberately
+extractive ~1B-token corpus. Parallel calls collapse outright: `parallel` 12.0,
+`live_parallel` 0.0. Multi-call composition works when the calls are
+sequentially motivated by the query and not when they are parallel
+instantiations of one schema. And 151 of 3,641 rows (4.1%) overflow the
+768-token context and score as misses.
+
+That is a data-volume boundary, not a cleverness boundary. This model saw ~1B
+unique tokens with no pretraining phase at all, in a corpus deliberately spent
+on depth. Breadth — Java and JS conventions, values the query paraphrases rather
+than states, open-domain coverage — is what more tokens buy. Models in this
+parameter class trained on two orders of magnitude more data do hold those
+numbers, which is the useful control: the architecture is not the limit, the
+corpus is. Crossing it is a ~$500 GPU-and-tokens project, not an idea.
+
+**Concentration beats volume exactly where the test is narrow, and nowhere
+else.** That is the honest shape of the result, and for anyone shipping an
+assistant against forty endpoints they control, the narrow case is the one they
+have.
 
 ## Numbers, disclosures, receipts
 
-48.12M params fp32 (11.5MB at their 2-bit standard, vs their 14MB at 45.0M) —
-parameter-class-matched, disclosed exactly. Their metric, their tables,
-their published numbers. DroidCall carries a caveat (their split is unseeded;
-ours is seeded from the same pool, firewalled from training). Every training
-row passed an 8-gram contamination firewall against every eval query. The
-Seal-in win is +0.5 on 700 rows and is stated as within noise.
-
-One model, one row, no per-suite checkpoint shopping. The full experimental
-record — including the twin that dev loss wrongly crowned — is in the repo.
+48.12M parameters, fp32 checkpoint (~11.5MB at 2-bit, ~92MB at bf16 — though
+what ships is the 184MB fp32 file and there is no on-device engine yet).
+768-token context. Mobile Actions' public train split, 8,693 rows disjoint from
+eval, is in the training mix — that is what "known catalog" means and it is the
+intended operating condition, but it should be read alongside the numbers rather
+than discovered later. Every training row passed an 8-gram contamination
+firewall against every evaluation query of every reported suite. One model, one
+row, no per-suite checkpoint shopping. The full experimental record — including
+the twin that dev loss wrongly crowned — is in the repo.
 
 *Built by one person and an AI assistant in about a week of evenings.
 Everything is MIT. The failures are the useful part.*

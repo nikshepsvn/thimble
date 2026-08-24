@@ -84,10 +84,11 @@ demo = gr.Interface(
     outputs=gr.Code(label="Tool calls", language="json"),
     title="🧵 Thimble — 48M-param tool calling, live on CPU",
     description=(
-        "A 48M-parameter model that beats Needle 2 (45M, trained on 153B tokens) on 3 of its 5 "
-        "published benchmarks with 150× less data. The JSON structure and argument keys are "
-        "**grammar-guaranteed** — the model only chooses tools, values, and when to stop. "
-        "Malformed JSON is unreachable. Runs here on a free CPU.\n\n"
+        "Calling tools against a known catalog is a structured extraction problem, not a "
+        "generation problem — and it fits in 48M parameters. The JSON structure and every "
+        "argument key are **grammar-guaranteed**; the model only chooses tools, values, and "
+        "when to stop, so malformed JSON and invented parameter names are unreachable. "
+        "86.3% strict exact match on app intents. Runs here on a free CPU.\n\n"
         "[Model](https://huggingface.co/flashvenom/thimble) · "
         "[Code + full experimental record](https://github.com/nikshepsvn/thimble)"
     ),

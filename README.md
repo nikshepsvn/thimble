@@ -1,43 +1,81 @@
 # 🧵 Thimble
 
-**A 48M-parameter tool-calling model that beats [Needle 2](https://cactuscompute.com/needle)
-(Cactus Compute, 45M, 153B training tokens) on 3 of its 5 published benchmarks —
-including their toughest, Seal-Tools — with 150× less training data.** MIT.
+**Tool calling in 48M parameters.** 86.3% ordered strict exact match on a real
+app-intent catalog, 100% well-formed JSON by construction, MIT.
+
+Calling tools against a *known* catalog is not an emergent capability of large
+models — it is a structured extraction problem, and it fits in 48M parameters.
+This repo is the model, the recipe that produced it, and the measured point where
+the approach stops working.
 
 **[Model on Hugging Face](https://huggingface.co/flashvenom/thimble)** ·
 [The full experimental record](RESULTS.md) · Total build cost: ~$260
 
 ![Results](assets/results.png)
 
-## Results
+## Try it in 30 seconds
 
-Ordered strict exact match — a row passes only if the function names, the call order,
-and every argument value match. Needle 2's numbers are from their published tables,
-their metric, unmodified.
+Download `thimble-v6.pt` from the [HF repo](https://huggingface.co/flashvenom/thimble)
+into `checkpoints/`, then:
 
-| Suite | **Thimble v6** | Needle 2 (45M) | |
-|---|---:|---:|---|
-| Seal-Tools in-domain (700) | **33.1** | 32.6 | ✅ their flagship suite (+0.5, within noise; stated as measured) |
-| Mobile Actions (961) | **86.3** | 63.7 | ✅ +22.6 |
-| DroidCall (200) | **52.5** | 17.0 | ✅ 3.1× |
-| Well-formed JSON | **100.0** | 93.4 | ✅ by construction |
-| Seal-Tools out-of-domain (654) | 28.1 | **28.7** | ❌ −0.6 |
-| BFCL v4 single-turn (3,641) | 23.5 | **42.6** | ❌ their data moat |
+```
+$ python demo.py "make a reservation at Nobu for 2 people at 7pm and text Sam saying dinner is on"
+[
+  {"name": "createReservation",
+   "arguments": {"partySize": 2, "restaurant": "Nobu", "time": "7pm"}},
+  {"name": "sendMessage",
+   "arguments": {"body": "dinner is on", "contact": "Sam"}}
+]
 
-For scale: Needle 2 is pretrained on 115B tokens and post-trained on 38B. Thimble
-saw **~1B unique tokens**, about **150x less**, and no pretraining phase at all.
-The comparison is parameter-class-matched (48.12M fp32 vs 45.0M at 2-bit; at their
-own deployment standard Thimble would be 11.5MB against their 14MB).
+$ python demo.py "sing me a happy birthday song"
+[]  (refused: no tool applies)
+```
 
-**Selection disclosure.** The pre-registered dev-loss champion was a sibling
-checkpoint that scored 28.4 on Seal-in; the model above is the annealed recipe's
-within-run dev winner. The selector's failure mode (a general-mix dev cannot rank a
-decay-annealed model) is diagnosed in [RESULTS.md](RESULTS.md), and both models'
-full tables are published there.
+Real output, not a mock — note the typed integer `partySize`, the two-call
+composition, and the refusal. `python demo.py` with no arguments runs a small
+example set.
 
-**DroidCall caveat.** Their split script calls `random.shuffle()` unseeded, so their
-exact 200 rows cannot be reproduced by anyone. Ours is a seeded split from the same
-pool with those rows firewalled out of training — same methodology, different rows.
+## What it does
+
+Ordered strict exact match: a row passes only if the function names, the call
+order, and every argument value match. The right-hand column is calibration —
+Needle 2 (Cactus Compute, 45M params, 153B training tokens), their published
+numbers, their metric, unmodified — so you can judge whether these numbers are
+any good. It is a reference point, not the thesis.
+
+**Known catalog** — the catalog was represented in training, eval rows firewalled out:
+
+| suite | Thimble v6 | for calibration |
+|---|---:|---:|
+| Mobile Actions (961) | **86.3** | 63.7 |
+| DroidCall (200) | **52.5** | 17.0 |
+| Seal-Tools in-domain (700) | **33.1** | 32.6 |
+| Well-formed JSON | **100.0** | 93.4 |
+
+**Unknown catalog** — schemas the model has never seen:
+
+| suite | Thimble v6 | for calibration |
+|---|---:|---:|
+| Seal-Tools out-of-domain (654) | 28.1 | 28.7 |
+| BFCL v4 single-turn (3,641) | 23.5 | 42.6 |
+
+Those two tables are the entire finding. Familiar catalog, it works. Unfamiliar
+catalog, it degrades — and the degradation is measurable inside a *single* suite:
+Seal-Tools in-domain 33.1 versus out-of-domain 28.1 is the same model on the same
+metric, with only the catalogs changed. Name-sequence accuracy tracks it exactly,
+88% in-domain against 79% out.
+
+**Disclosures.** Mobile Actions' public train split (8,693 rows, disjoint from
+eval) is in the training mix; that is what "known catalog" means, and it is the
+intended operating condition rather than a caveat. DroidCall's official split
+script calls `random.shuffle()` unseeded, so their exact 200 rows cannot be
+reproduced by anyone — ours is a seeded split from the same pool with those rows
+firewalled out of training. The Seal-in margin over the calibration column is
++0.5 on 700 rows, which is within sampling noise and should not be read as a win.
+The pre-registered dev-loss champion was a sibling checkpoint that scored 28.4 on
+Seal-in; the model above is the annealed recipe's within-run dev winner. The
+selector's failure mode — a general-mix dev cannot rank a decay-annealed model —
+is diagnosed in [RESULTS.md](RESULTS.md), with both models' full tables published.
 
 ## How it works
 
@@ -78,36 +116,7 @@ unreachable parameter-name hallucination, and parseability on the ~11% of Seal r
 where free generation emits invalid JSON. That is worth having, and it is not the same
 claim as "constrained decoding makes the model correct".
 
-## What did not work
-
-Five plausible ideas, each killed by a measurement rather than an argument. This is the
-part most worth reading.
-
-| idea | result | why |
-|---|---|---|
-| Word-span copying | **-30 pts** | span boundaries are wrong more often than free generation |
-| Pointer/copy head (endpoints) | **-16 pts** | head learns, but its confidence does not correlate with correctness |
-| `MAX_CALLS` 4 -> 6 | **0.000** | the cap was never binding; long rows fail for other reasons |
-| Global optional-skip prior | rejected | inclusion rate is catalog-dependent (33% Seal, 94% Mobile Actions) — a constant trades one suite for another |
-| Search: beam / RL / best-of-N | **capped at +5.0** | pass@9 is an *oracle* bound and only reaches 29.3 vs the 32.6 needed |
-| Draft-then-constrain (DCCD) | **no effect possible** | requires a projection tax; measured at -1.3 and +0.0, so there is nothing to recover |
-| Down-weighting grammar-forced tokens (RFT-style) | **-12 pts** | controlled twin run; structure tokens carry the call-sequencing signal |
-| Field-set reranking (PGR-style) | **-1.4** | by the time it ran, training had already fixed the key-set bucket it targets (fixed 3, broke 13) |
-| MRT/RLOO fine-tune | mixed, then unusable | +1.9 out-domain / -1.0 in-domain on v5; diverges outright on the annealed v6 checkpoint at every LR tried |
-| Emitting numerics to match Seal's gold typing | **not learnable** | their string-vs-number choice is 74% mixed per parameter; per-param policy ceiling 87.8% vs 86.4% global — noise |
-| From-scratch retrain on the corrective corpus | **-4.7 vs annealing** | corrective data dilutes into the average from scratch; annealed into a trained model it concentrates (RESULTS.md, v6 twins) |
-
-Two of these reversed conclusions we would otherwise have shipped on intuition. The
-pointer-head result is independently corroborated: pointer generators are reported to
-*hurt* structured extraction under grammar-constrained decoding in low-resource settings.
-
-Needle's architecture is also not the advantage. Their own controlled study
-(arXiv 2607.18363) finds deleting the FFN costs 0.47 nats at matched depth and only
-breaks even at matched parameters (0.006 nats), and this model independently matches
-every load-bearing item in their recipe: QK-normalization, sandwich norm, 20 layers,
-Muon, and the same token-level loss weights.
-
-## The equation that drove three cycles
+## The recipe
 
 Row accuracy factors as `P(name sequence) x p^n`, where `p` is per-call argument
 accuracy. Every version was built by measuring which factor was binding and
@@ -127,17 +136,71 @@ checker), and ~29 were unwinnable type-convention noise in the gold itself.
 Mid-run causal check: +3.3 Seal points at constant LR, attributable purely to the
 corrective corpus.
 
-## Known defects
+**Where corrective data belongs.** The same corpus, fed two ways, in a controlled
+twin run:
 
-- **Out-of-domain name selection.** Seal-out name-sequence accuracy is 79% vs 88%
-  in-domain — unfamiliar catalogs remain the weak point, and the -0.6 loss on that
-  suite lives there.
-- **768-token context.** ~4% of BFCL rows do not fit and are scored as misses.
-- **Breadth.** BFCL generation categories run 10-30%: Java/JS schema dialects and
-  paraphrase-distance values are absent from a deliberately extractive 1B-token
-  corpus. This is the data-scale boundary, priced in RESULTS.md, not a bug.
+| | Seal-in |
+|---|---:|
+| trained from scratch on the corrective mix | 28.4 |
+| annealed into the LR-decay phase of a continued run | **33.1** |
+
+From scratch, corrective data dilutes into the average. Annealed into an already
+trained model during decay — where behavior crystallizes — it concentrates. This is
+probably the most portable result in the repo.
+
+## What did not work
+
+Eleven plausible ideas, each killed by a measurement rather than an argument. This
+is the part most worth reading.
+
+| idea | result | why |
+|---|---|---|
+| Word-span copying | **-30 pts** | span boundaries are wrong more often than free generation |
+| Pointer/copy head (endpoints) | **-16 pts** | head learns, but its confidence does not correlate with correctness |
+| `MAX_CALLS` 4 -> 6 | **0.000** | the cap was never binding; long rows fail for other reasons |
+| Global optional-skip prior | rejected | inclusion rate is catalog-dependent (33% Seal, 94% Mobile Actions) — a constant trades one suite for another |
+| Search: beam / RL / best-of-N | **capped at +5.0** | pass@9 is an *oracle* bound and only reaches 29.3 vs the 32.6 it needed |
+| Draft-then-constrain (DCCD) | **no effect possible** | requires a projection tax; measured at -1.3 and +0.0, so there is nothing to recover |
+| Down-weighting grammar-forced tokens (RFT-style) | **-12 pts** | controlled twin run; structure tokens carry the call-sequencing signal |
+| Field-set reranking (PGR-style) | **-1.4** | by the time it ran, training had already fixed the key-set bucket it targets (fixed 3, broke 13) |
+| MRT/RLOO fine-tune | mixed, then unusable | +1.9 out-domain / -1.0 in-domain on v5; diverges outright on the annealed v6 checkpoint at every LR tried |
+| Emitting numerics to match Seal's gold typing | **not learnable** | their string-vs-number choice is 74% mixed per parameter; per-param policy ceiling 87.8% vs 86.4% global — noise |
+| From-scratch retrain on the corrective corpus | **-4.7 vs annealing** | corrective data dilutes into the average from scratch; annealed into a trained model it concentrates |
+
+Two of these reversed conclusions that would otherwise have shipped on intuition. The
+pointer-head result is independently corroborated: pointer generators are reported to
+*hurt* structured extraction under grammar-constrained decoding in low-resource settings.
+
+A twelfth belongs here even though it is a process failure rather than an idea: the
+pre-registered champion selector picked the wrong checkpoint, and the post-mortem is
+in RESULTS.md.
+
+## Where it stops working
+
+The boundary is the point of the two tables above, so it is worth stating precisely
+rather than burying.
+
+- **Unfamiliar catalogs.** Out-of-domain name-sequence accuracy is 79% against 88%
+  in-domain. Every out-of-domain deficit traces back to this one number.
+- **Schema dialects.** `simple_python` scores 29.3, but `simple_java` 14.0 and
+  `simple_javascript` 8.0. Java and JS schema conventions are simply absent from a
+  deliberately extractive ~1B-token corpus.
+- **Parallel calls.** `parallel` 12.0 and `live_parallel` 0.0 on BFCL. Multi-call
+  composition works when the calls are sequentially motivated by the query and not
+  when they are parallel instantiations of one schema.
+- **768-token context.** 151 of 3,641 BFCL rows (4.1%) do not fit and are scored as
+  misses.
+- **Deployment.** 48.12M parameters is ~11.5MB at 2-bit and ~92MB at bf16, but what
+  ships here is the 184MB fp32 checkpoint and there is no on-device inference engine.
+  The size claim is a property of the parameter count, not of an artifact you can run
+  on a microcontroller today.
 - (Fixed since v4: small-catalog refusal — BFCL irrelevance went 0.0 -> 57.9 after
   the refuse-gate fix and small-catalog refusal data.)
+
+Scale is the honest explanation for most of this. The model saw ~1B unique tokens
+with no pretraining phase. Breadth is what more data buys, and this corpus was
+deliberately spent on depth instead. That trade is priced in RESULTS.md rather than
+excused.
 
 ## Layout
 
@@ -162,28 +225,6 @@ scripts/
 
 `RESULTS.md` carries the full experimental record, including every negative result and
 the reasoning that produced it.
-
-## Try it in 30 seconds
-
-Download `thimble-v6.pt` from the [HF repo](https://huggingface.co/flashvenom/thimble)
-into `checkpoints/`, then:
-
-```
-$ python demo.py "make a reservation at Nobu for 2 people at 7pm and text Sam saying dinner is on"
-[
-  {"name": "createReservation",
-   "arguments": {"partySize": 2, "restaurant": "Nobu", "time": "7pm"}},
-  {"name": "sendMessage",
-   "arguments": {"body": "dinner is on", "contact": "Sam"}}
-]
-
-$ python demo.py "sing me a happy birthday song"
-[]  (refused: no tool applies)
-```
-
-Real output, not a mock — note the typed integer `partySize`, the two-call
-composition, and the refusal. `python demo.py` with no arguments runs a small
-example set.
 
 ## Reproducing
 
@@ -210,9 +251,10 @@ the v6 cycle alone, which produced the headline numbers, about $85.
 
 ## Honest summary
 
-A 48M model that beats a 45M model on three of its five published tables — including
-the Seal-Tools suite it is benchmarked around, by a margin inside sampling noise and
-stated as such — trained on 150x less data, with every win and every loss measured.
-The data advantage that could not be engineered around (BFCL's breadth) is quantified
-rather than excused. Built by one person over a few days with AI assistance, for
-about the price of a video game console, against a funded team's model.
+Tool calling against a catalog you control is a smaller problem than the models
+usually deployed for it. At 48M parameters, with no pretraining phase and ~1B unique
+tokens, this one reaches 86.3% exact match on app intents and cannot emit malformed
+JSON or hallucinate a parameter name. Off that catalog it degrades sharply, and the
+degradation is measured rather than described — schema dialects, parallel calls, and
+unfamiliar name selection, each quantified. Built by one person over a few days with
+AI assistance, for about the price of a video game console.
