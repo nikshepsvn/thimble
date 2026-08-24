@@ -101,6 +101,12 @@ argument values that appear in the query, and a reason to care about 48M
 parameters — a memory ceiling, a latency floor, or wanting a separate model per
 customer rather than one prompted model for all of them.
 
+The gate is how *extractive* your requests are, not what domain they are in. A
+biomedical catalog in `dot.notation` the model has never seen does fine when the
+query states its identifiers verbatim; a friendly-looking app catalog does worse
+when the phrasing is conversational and the values have to be inferred. Chains of
+calls are fine — 73.5% on two-plus-call rows for a catalog it knows.
+
 Do not reach for it for open-world tool catalogs, Java or JavaScript schema
 dialects, or parallel calls. And if you can afford 600M parameters, fine-tune
 Qwen instead — it will probably score higher. This is for when you cannot.
@@ -120,6 +126,7 @@ has a scale — 86.3 means little until you know what else scores on that suite.
 | Mobile Actions (961) | **86.3** | 63.7 |
 | DroidCall (200) | **52.5** | 17.0 |
 | Seal-Tools in-domain (700) | **33.1** | 32.6 |
+| Mobile Actions, two-plus-call rows | **73.5** | 48.4 |
 | Well-formed JSON | **100.0** | 93.4 |
 
 **Unknown catalog** — schemas the model has never seen:
@@ -229,9 +236,14 @@ and the takeaway. It is the most reusable part of the project.
 - **Schema dialects.** `simple_python` scores 29.3 on BFCL, but `simple_java`
   14.0 and `simple_javascript` 8.0. Java and JS conventions are absent from a
   deliberately extractive ~1B-token corpus.
-- **Parallel calls.** `parallel` 12.0 and `live_parallel` 0.0. Multi-call
-  composition works when calls are sequentially motivated by the query, not when
-  they are parallel instantiations of one schema.
+- **Multi-call tracks per-call accuracy, not call count.** Row accuracy is
+  `P(names) x p^n`, so chains collapse wherever `p` is mediocre — and hold up
+  where it is not. Two-plus-call rows score **73.5%** on Mobile Actions but
+  19.4% on Seal-Tools in-domain and 18.0% out-of-domain. The call count is not
+  the problem; the catalog is.
+- **Parallel calls are a separate, worse failure.** `parallel` 12.0 and
+  `live_parallel` 0.0 on BFCL. The model handles calls the query motivates in
+  sequence; it does not handle repeated instantiations of one schema.
 - **768-token context.** 151 of 3,641 BFCL rows (4.1%) do not fit and score as misses.
 - **Deployment.** 48.12M parameters is ~11.5MB at 2-bit and ~92MB at bf16, but
   what ships here is the 184MB fp32 checkpoint and **there is no on-device

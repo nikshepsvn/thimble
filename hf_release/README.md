@@ -136,6 +136,7 @@ published numbers on their metric. It is there so the left column has a scale.
 | Mobile Actions (961) | **86.3** | 63.7 |
 | DroidCall (200) | **52.5** | 17.0 |
 | Seal-Tools in-domain (700) | **33.1** | 32.6 |
+| Mobile Actions, two-plus-call rows | **73.5** | 48.4 |
 | Well-formed JSON | **100.0** | 93.4 |
 
 **Unknown catalog** — schemas the model has never seen:
@@ -210,9 +211,13 @@ Two of these reversed conclusions that would otherwise have shipped on intuition
 - **Schema dialects.** `simple_python` scores 29.3 on BFCL, but `simple_java`
   14.0 and `simple_javascript` 8.0 — Java and JS schema conventions are absent
   from a deliberately extractive ~1B-token corpus.
-- **Parallel calls.** `parallel` 12.0 and `live_parallel` 0.0. Multi-call
-  composition works when calls are sequentially motivated by the query, not when
-  they are parallel instantiations of one schema.
+- **Multi-call tracks per-call accuracy, not call count.** Row accuracy is
+  `P(names) x p^n`, so chains collapse wherever `p` is mediocre and hold up where
+  it is not: two-plus-call rows score **73.5%** on Mobile Actions but 19.4% on
+  Seal-Tools in-domain. The call count is not the problem; the catalog is.
+- **Parallel calls are a separate, worse failure.** `parallel` 12.0 and
+  `live_parallel` 0.0 on BFCL — repeated instantiations of one schema, as
+  opposed to calls the query motivates in sequence.
 - **768-token context.** 151 of 3,641 BFCL rows (4.1%) do not fit and score as misses.
 - **Deployment.** 48.12M parameters is ~11.5MB at 2-bit and ~92MB at bf16, but
   what ships here is the 184MB fp32 checkpoint and there is no on-device
