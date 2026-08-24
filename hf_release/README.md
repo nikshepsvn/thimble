@@ -82,14 +82,14 @@ stops working.
 ## What it does
 
 Ordered strict exact match: a row passes only if the function names, the call
-order, and *every* argument value match. The right-hand column is calibration —
-Needle 2 (Cactus Compute, 45M params, 153B training tokens), their published
-numbers on their metric — included so the left column is interpretable, not as
-a claim about who wins.
+order, and *every* argument value match. The right-hand column is a yardstick, not a
+rival: Needle 2 (Cactus Compute, 45M params, 153B training tokens), their
+published numbers on their metric. It is there so the left column has a scale —
+86.3 means little until you know what else scores on that suite.
 
 **Known catalog** — represented in training, eval rows firewalled out:
 
-| suite | Thimble v6 | for calibration |
+| suite | Thimble v6 | Needle 2 (45M) |
 |---|---:|---:|
 | Mobile Actions (961) | **86.3** | 63.7 |
 | DroidCall (200) | **52.5** | 17.0 |
@@ -98,7 +98,7 @@ a claim about who wins.
 
 **Unknown catalog** — schemas the model has never seen:
 
-| suite | Thimble v6 | for calibration |
+| suite | Thimble v6 | Needle 2 (45M) |
 |---|---:|---:|
 | Seal-Tools out-of-domain (654) | 28.1 | 28.7 |
 | BFCL v4 single-turn (3,641) | 23.5 | 42.6 |
