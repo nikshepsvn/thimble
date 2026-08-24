@@ -1,3 +1,7 @@
+> **Historical planning document.** Written during the v4 cycle and kept as a record
+> of what was planned, not what shipped. Parameter counts and targets here are v4-era
+> (44M); current numbers are in [README.md](README.md) and [FINDINGS.md](FINDINGS.md).
+
 # v5 — the strongest 44M we can build
 
 Objective: train the strongest tool-calling model this project can produce and
