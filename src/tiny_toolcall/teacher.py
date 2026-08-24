@@ -403,15 +403,22 @@ async def _one_trace(
     return None
 
 
-async def synth_teacher(n: int, out: Path, model: str = VOLUME_MODEL, concurrency: int = 24, seed: int = 0) -> dict:
+def _resolve_key() -> str:
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
         env = Path(__file__).resolve().parents[2] / ".env"
-        for line in env.read_text().splitlines():
-            if line.startswith("OPENROUTER_API_KEY="):
-                key = line.split("=", 1)[1].strip()
+        if env.exists():
+            for line in env.read_text().splitlines():
+                if line.startswith("OPENROUTER_API_KEY="):
+                    key = line.split("=", 1)[1].strip()
     if not key:
         raise SystemExit("no OPENROUTER_API_KEY")
+    return key
+
+
+async def _run_synth(n: int, out: Path, trace_fn, concurrency: int, seed: int) -> dict:
+    """Shared driver: rolling window so one straggler never stalls the batch."""
+    key = _resolve_key()
     cap = SpendCap(float(os.environ.get("OPENROUTER_SPEND_CAP", "80")))
     rng = random.Random(seed)
     sem = asyncio.Semaphore(concurrency)
@@ -427,12 +434,10 @@ async def synth_teacher(n: int, out: Path, model: str = VOLUME_MODEL, concurrenc
     limits = httpx.Limits(max_connections=400, max_keepalive_connections=100)
     async with httpx.AsyncClient(headers={"Authorization": f"Bearer {key}"}, limits=limits) as client:
         with out.open("a") as f:
-            # rolling window: results are consumed as they finish, so a straggler
-            # never stalls the pipeline (batch-gather waited on the slowest of 200)
             for start in range(0, n, 5000):
                 chunk = min(5000, n - start)
                 tasks = [
-                    asyncio.ensure_future(_one_trace(client, sem, cap, rng, model, seen))
+                    asyncio.ensure_future(trace_fn(client, sem, cap, rng, seen))
                     for _ in range(chunk)
                 ]
                 for fut in asyncio.as_completed(tasks):
@@ -446,6 +451,144 @@ async def synth_teacher(n: int, out: Path, model: str = VOLUME_MODEL, concurrenc
                         print(f"teacher: {ok} ok / {bad} rejected, ~${cap.spent:.2f} spent")
                         f.flush()
     print(f"teacher final: {ok} ok / {bad} rejected, ~${cap.spent:.2f} spent")
-    for reason, n in REJECTS.most_common(8):
-        print(f"  reject x{n}: {reason}")
+    for reason, cnt in REJECTS.most_common(8):
+        print(f"  reject x{cnt}: {reason}")
     return {"ok": ok, "rejected": bad, "spent_usd": round(cap.spent, 2)}
+
+
+async def synth_teacher(n: int, out: Path, model: str = VOLUME_MODEL, concurrency: int = 24, seed: int = 0) -> dict:
+    async def fn(client, sem, cap, rng, seen):
+        return await _one_trace(client, sem, cap, rng, model, seen)
+
+    return await _run_synth(n, out, fn, concurrency, seed)
+
+
+# --- adaptation: synthesis against a caller-supplied catalog ---------------
+
+# The omission bucket was the single largest v5 failure (66 of 193 failing
+# calls added exactly one unmentioned optional), so it is worth targeting on a
+# user catalog too. FOCUS_OMIT cannot be reused verbatim: it dictates the shape
+# of tools the teacher invents, and here the tools are fixed.
+FOCUS_OMIT_GIVEN = (
+    "The query must state values for only a minority of the optional parameters "
+    "of the tools it uses. The answer must include ONLY the parameters whose "
+    "values the query actually states — omitting the optionals the query never "
+    "mentions is the entire point of this example.\n"
+)
+
+
+async def _one_trace_catalog(
+    client: httpx.AsyncClient,
+    sem: asyncio.Semaphore,
+    cap: SpendCap,
+    rng: random.Random,
+    model: str,
+    seen: set[str],
+    catalog: list[dict],
+    max_calls: int = 4,
+) -> dict | None:
+    """One trace against a fixed, caller-supplied catalog.
+
+    Mirrors the invent=False branch of _one_trace: the teacher is handed real
+    schemas and asked only for a query and its calls, so every row is validated
+    against the caller's own parameter types and evidence rules.
+    """
+    chain = ["one", "two", "three", "four", "five", "refuse"]
+    weights = list(CHAIN_MIX)
+    for i, name in enumerate(chain):
+        n_calls = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}.get(name)
+        if n_calls and (n_calls > max_calls or n_calls > len(catalog)):
+            weights[i] = 0
+    if not any(weights):
+        weights[0] = 1
+    template = rng.choices(chain, weights=weights)[0]
+    style = rng.choice(STYLES)
+    focus = "plain" if template == "refuse" else \
+        rng.choices(["omit", "distract", "plain"], weights=[40, 30, 30])[0]
+
+    # a refusal is only hard to learn when the catalog is small
+    if template == "refuse" and rng.random() < 0.5:
+        n_tools = rng.randint(1, min(2, len(catalog)))
+    else:
+        n_tools = rng.randint(min(3, len(catalog)), min(8, len(catalog)))
+    tools = rng.sample(catalog, n_tools)
+    schemas = [dict(t) for t in tools]
+    tools_by_name = {s["name"]: s for s in schemas}
+    user = (
+        f"template={template}\nstyle={style}\n"
+        f"tools:\n{json.dumps(schemas, ensure_ascii=False)}\n"
+        + {"omit": FOCUS_OMIT_GIVEN, "distract": FOCUS_DISTRACT}.get(focus, "")
+        + "Generate one example now."
+    )
+    messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
+    err: str | None = "no attempt completed"
+    for _ in range(2):
+        async with sem:
+            try:
+                r = await client.post(
+                    API,
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "temperature": 1.0,
+                        "max_tokens": 1600,
+                        "reasoning": {"enabled": False},
+                        "provider": {"sort": "throughput"},
+                    },
+                    timeout=90,
+                )
+                r.raise_for_status()
+            except RuntimeError:  # spend cap
+                return None
+            except httpx.HTTPError:
+                await asyncio.sleep(2 + rng.random() * 3)
+                continue
+        body = r.json()
+        await cap.add(body.get("usage"))
+        text = ((body.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+        try:
+            ex = _extract_json(text)
+            err = None if ex is not None else "not valid JSON"
+            if err is None and ex is not None:
+                _strip_unevidenced(ex, tools_by_name)
+                err = _validate(ex, tools_by_name, template)
+            if err is None and ex is not None:
+                q_norm = " ".join(ex["query"].lower().split())
+                if q_norm in seen:
+                    err = "duplicate query, produce a different one"
+                else:
+                    seen.add(q_norm)
+        except Exception as e:  # a malformed reply must never kill the batch
+            ex, err = None, f"validator error: {e}"
+        if err is None and ex is not None:
+            return {
+                "query": ex["query"].strip(),
+                "tools": schemas,
+                "answers": canon_calls(ex["answers"]),
+                "kind": template,
+                "focus": focus,
+                "split": "adapt",
+            }
+        messages.append({"role": "assistant", "content": text})
+        messages.append({"role": "user", "content": f"Invalid: {err}. Emit corrected JSON only."})
+    REJECTS[f"adapt/{focus}: {(err or 'http error')[:60]}"] += 1
+    return None
+
+
+async def synth_for_catalog(
+    catalog: list[dict],
+    n: int,
+    out: Path,
+    model: str = VOLUME_MODEL,
+    concurrency: int = 24,
+    seed: int = 0,
+    max_calls: int = 4,
+) -> dict:
+    """Synthesize n validated training rows for a caller-supplied tool catalog."""
+    if not catalog:
+        raise SystemExit("empty catalog")
+
+    async def fn(client, sem, cap, rng, seen):
+        return await _one_trace_catalog(client, sem, cap, rng, model, seen, catalog, max_calls)
+
+    return await _run_synth(n, out, fn, concurrency, seed)

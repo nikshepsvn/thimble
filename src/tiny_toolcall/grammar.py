@@ -353,6 +353,10 @@ def _sorted_props(tool: dict[str, Any]) -> tuple[list[str], set[str], dict[str, 
     return sorted(props), required, props
 
 
+# Inference only: no caller backprops through the decode loop (MRT computes its
+# gradients from seq_logprob instead), so building an autograd graph here is pure
+# waste — and it made every decode warn about tensor->scalar conversion.
+@torch.no_grad()
 def constrained_decode(
     model,
     tok: BPETokenizer,

@@ -1,0 +1,7 @@
+{"query": "book a table for 4 at 8pm at Nobu", "answers": [{"name": "createReservation", "arguments": {"partySize": 4, "time": "8pm", "restaurant": "Nobu"}}]}
+{"query": "text Priya that I'm running late", "answers": [{"name": "sendMessage", "arguments": {"contact": "Priya", "body": "I'm running late"}}]}
+{"query": "set an alarm for 6:30am called gym", "answers": [{"name": "setAlarm", "arguments": {"time": "6:30am", "label": "gym"}}]}
+{"query": "whats the weather in berlin", "answers": [{"name": "getWeather", "arguments": {"city": "berlin"}}]}
+{"query": "reserve a table for 2 at 7pm and text Sam saying dinner is on", "answers": [{"name": "createReservation", "arguments": {"partySize": 2, "time": "7pm"}}, {"name": "sendMessage", "arguments": {"contact": "Sam", "body": "dinner is on"}}]}
+{"query": "sing me a happy birthday song", "answers": []}
+{"query": "what is the capital of France", "answers": []}

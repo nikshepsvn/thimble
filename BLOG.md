@@ -155,6 +155,26 @@ else.** That is the honest shape of the result, and for anyone shipping an
 assistant against forty endpoints they control, the narrow case is the one they
 have.
 
+## Making it yours
+
+All of which points at the thing the model is actually for. If accuracy depends
+this sharply on catalog familiarity, then the useful artifact is not the
+checkpoint — it is the loop that re-specializes it.
+
+At 48M parameters that loop is cheap enough to be routine. `scripts/adapt.py`
+takes your tool schemas, has a teacher model write validated (query → calls)
+rows against them, blends those with guard corpora so the model does not forget
+general tool calling, and anneals the blend into the learning-rate decay phase of
+a continued run from the shipped checkpoint. A few hours on one GPU, roughly $60
+of synthesis. `scripts/eval_catalog.py` scores the result on your own gold rows
+against the unadapted baseline, so the question "did that help?" has a number.
+
+Nobody fine-tunes a 7B model per customer. At 48M you can, and that — rather
+than any benchmark row — is the argument for building at this size.
+
+The honest caveat: the recipe is measured, but the ergonomics are new. No
+third-party catalog has been through it and published yet.
+
 ## Numbers, disclosures, receipts
 
 48.12M parameters, fp32 checkpoint (~11.5MB at 2-bit, ~92MB at bf16 — though

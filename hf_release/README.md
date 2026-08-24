@@ -71,25 +71,63 @@ model-index:
 ---
 # 🧵 Thimble
 
-**Tool calling in 48M parameters.** 86.3% ordered strict exact match on a real
-app-intent catalog, 100% well-formed JSON by construction.
+**Tool calling in 48M parameters — small enough to specialize per domain.**
 
-[**GitHub (code, evals, full experimental record)**](https://github.com/nikshepsvn/thimble) · MIT · 48.12M params · 768-token context · $260 total build cost
+Most tool-calling models are trained once and prompted everywhere. This one is
+built to be *re-specialized*: at 48M parameters, adapting it to your own tool
+catalog is a few hours on one GPU and roughly $60 of synthesis, so you can have
+a model **per** domain instead of a prompt per domain.
+
+[**GitHub — code, adaptation loop, full experimental record**](https://github.com/nikshepsvn/thimble) · MIT · 48.12M params · 768-token context
 
 ![Results](results.png)
 
-Calling tools against a *known* catalog is not an emergent capability of large
-models — it is a structured extraction problem, and it fits in 48M parameters.
-This card covers what the model does, how it was built, and exactly where it
-stops working.
+## Make it yours
+
+```bash
+git clone https://github.com/nikshepsvn/thimble && cd thimble
+uv venv && uv pip install -e .
+# put thimble-v6.pt in checkpoints/, tokenizer.json in data/
+
+# where do you stand on your own tools?
+python scripts/eval_catalog.py --ckpt thimble-v6 \
+    --catalog my_tools.json --gold my_eval.jsonl
+
+# adapt: synthesize against your schemas, anneal into the decay phase
+python scripts/adapt.py --catalog my_tools.json --name mydomain
+
+# did it help?
+python scripts/eval_catalog.py --ckpt mydomain --baseline thimble-v6 \
+    --catalog my_tools.json --gold my_eval.jsonl
+```
+
+Two things about that recipe are load-bearing, and both were measured rather
+than assumed. **Anneal, don't retrain** — the same corrective corpus scored 28.4
+fed from scratch and 33.1 annealed into the LR-decay phase. **Keep the guard
+data** — annealing purely on your catalog trades away the general competence you
+are building on.
+
+`adapt.py` wires together exactly the machinery that produced the v6 result, but
+no third-party catalog has been adapted and published yet. The recipe is
+measured; the ergonomics are new.
+
+## When to use this
+
+Reach for it when you have a **fixed catalog you control**, English queries,
+argument values that appear in the query, and a reason to care about 48M
+parameters — a memory ceiling, a latency floor, or wanting a separate model per
+customer rather than one prompted model for all of them.
+
+Do not reach for it for open-world catalogs, Java or JavaScript schema dialects,
+or parallel calls. And if you can afford 600M parameters, fine-tune Qwen
+instead — it will probably score higher. This is for when you cannot.
 
 ## What it does
 
 Ordered strict exact match: a row passes only if the function names, the call
-order, and *every* argument value match. The right-hand column is a yardstick, not a
-rival: Needle 2 (Cactus Compute, 45M params, 153B training tokens), their
-published numbers on their metric. It is there so the left column has a scale —
-86.3 means little until you know what else scores on that suite.
+order, and *every* argument value match. The right-hand column is a yardstick,
+not a rival: Needle 2 (Cactus Compute, 45M params, 153B training tokens), their
+published numbers on their metric. It is there so the left column has a scale.
 
 **Known catalog** — represented in training, eval rows firewalled out:
 
@@ -107,19 +145,18 @@ published numbers on their metric. It is there so the left column has a scale �
 | Seal-Tools out-of-domain (654) | 28.1 | 28.7 |
 | BFCL v4 single-turn (3,641) | 23.5 | 42.6 |
 
-Those two tables are the whole finding. Familiar catalog, it works; unfamiliar
-catalog, it degrades — and the degradation shows up *inside a single suite*:
-Seal-Tools in-domain 33.1 vs out-of-domain 28.1 is the same model on the same
-metric with only the catalogs changed. Name-sequence accuracy tracks it exactly,
-88% in-domain against 79% out.
+Those two tables are why the adaptation loop exists. Familiar catalog, it works;
+unfamiliar catalog, it degrades — measurably, *inside a single suite*: 33.1
+in-domain versus 28.1 out, same model, same metric, only the catalogs changed.
+Name-sequence accuracy tracks it exactly, 88% in-domain against 79% out. Getting
+your catalog into the first column is the whole job.
 
 **Before quoting the table.** Mobile Actions' public train split (8,693 rows,
-disjoint from eval) is in the training mix — that is what "known catalog" means,
-and it is the intended operating condition. The Seal-in margin over the
-calibration column is +0.5 on 700 rows, within sampling noise. The pre-registered
-model selector picked a sibling checkpoint that scored worse; the failure is
-diagnosed and both models' results are published in
-[RESULTS.md](https://github.com/nikshepsvn/thimble/blob/master/RESULTS.md).
+disjoint from eval) is in the training mix — that is what "known catalog" means.
+The Seal-in margin over the yardstick is +0.5 on 700 rows, within sampling
+noise. The pre-registered selector picked a sibling checkpoint that scored
+worse; the failure is diagnosed and both models' results are published in
+[FINDINGS.md](https://github.com/nikshepsvn/thimble/blob/master/FINDINGS.md).
 
 ## How it was built
 

@@ -1,0 +1,27 @@
+[
+  {"name": "createReservation",
+   "description": "Book a table at a restaurant",
+   "parameters": {"type": "object", "properties": {
+     "partySize": {"type": "integer", "description": "number of people"},
+     "time": {"type": "string", "description": "reservation time"},
+     "restaurant": {"type": "string", "description": "restaurant name"}},
+     "required": ["partySize", "time"]}},
+  {"name": "sendMessage",
+   "description": "Send a text message to a contact",
+   "parameters": {"type": "object", "properties": {
+     "contact": {"type": "string", "description": "who to message"},
+     "body": {"type": "string", "description": "message content"}},
+     "required": ["contact", "body"]}},
+  {"name": "setAlarm",
+   "description": "Set an alarm",
+   "parameters": {"type": "object", "properties": {
+     "time": {"type": "string", "description": "alarm time"},
+     "label": {"type": "string", "description": "alarm label"}},
+     "required": ["time"]}},
+  {"name": "getWeather",
+   "description": "Get the weather forecast for a city",
+   "parameters": {"type": "object", "properties": {
+     "city": {"type": "string", "description": "city name"},
+     "date": {"type": "string", "description": "date, YYYY-MM-DD"}},
+     "required": ["city"]}}
+]
