@@ -8,12 +8,13 @@ sdk_version: 5.49.1
 app_file: app.py
 pinned: false
 license: mit
-short_description: Tool calling in 48M parameters, grammar-guaranteed JSON
+short_description: A tool-calling layer, not a language model — 48M params
 ---
 
 # 🧵 Thimble — live demo
 
-Tool calling in 48M parameters, running grammar-constrained on a free CPU.
+A tool-calling layer, not a language model: your schemas in, validated calls out,
+at 48M parameters, running on a free CPU.
 Bring your own tool catalog — the JSON structure and every argument key are
 guaranteed by a compiled grammar, so malformed output is unreachable.
 

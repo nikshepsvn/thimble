@@ -71,18 +71,91 @@ model-index:
 ---
 # 🧵 Thimble
 
-**Tool calling in 48M parameters — small enough to specialize per domain.**
+**A tool-calling layer, not a language model.** Your schemas in, validated calls
+out, at 48M parameters.
 
-Most tool-calling models are trained once and prompted everywhere. This one is
-built to be *re-specialized*: at 48M parameters, adapting it to your own tool
-catalog is a few hours on one GPU and roughly $60 of synthesis, so you can have
-a model **per** domain instead of a prompt per domain.
+It does not converse, reason, or write prose — it was never trained to. It reads
+a catalog of typed functions and a request, and returns the calls to make or an
+empty list when nothing fits. That narrowness is the point: the whole job fits in
+48M parameters, small enough that specializing it to one API surface is routine
+rather than a project.
 
 [**GitHub — code, adaptation loop, full experimental record**](https://github.com/nikshepsvn/thimble) · MIT · 48.12M params · 768-token context
 
 ![Results](results.png)
 
-## Make it yours
+## The contract
+
+Three guarantees hold on **any** catalog, with no training and no configuration,
+because they come from a grammar compiled out of your schemas rather than from
+the weights:
+
+- **Output is always well-formed JSON.** Malformed output is unreachable, not unlikely.
+- **Argument keys come from your schema.** Parameter-name hallucination is structurally impossible.
+- **Calls to tools you did not declare cannot be emitted.**
+
+The model is consulted at exactly five choice points: refuse-or-call, which tool,
+include this optional, what value, stop or continue. Everything else — braces,
+quotes, commas, every argument key — is determined before it runs. Accuracy is a
+separate question, answered below with numbers; the contract is not conditional
+on any of them.
+
+## Does this fit your problem?
+
+**Works out of the box when** requests are command-shaped and state their values:
+`annotate variant rs4988235 against build GRCh38`. Identifiers, codes, dates,
+numbers, enum picks — copied, not inferred. Chains are fine: two-plus-call rows
+score **73.5%** on a catalog it knows.
+
+The gate is how *extractive* the request is, not what domain it belongs to. In a
+pair of small probes, an unseen biomedical catalog in `dot.notation` scored 0.75
+while a familiar-looking app catalog with conversational phrasing scored 0.57.
+(15 rows total — directional, not a measurement.)
+
+**Adapt it when** you need conversational phrasing, disciplined handling of
+optional arguments, or calibrated refusal — the three documented weak spots.
+
+**Use something else when** you have an open-world catalog, need Java or
+JavaScript schema dialects, or need parallel instantiations of one schema. If you
+can afford 600M parameters, fine-tune Qwen instead — it will probably score
+higher. This is for when you cannot.
+
+## Numbers
+
+Ordered strict exact match — function names, call order, and every argument value
+must match. The right-hand column is a yardstick, not a rival: Needle 2 (Cactus
+Compute, 45M params, 153B training tokens), their published numbers on their
+metric, so the left column has a scale.
+
+**Catalog represented in training** (eval rows firewalled out):
+
+| suite | Thimble v6 | Needle 2 (45M) |
+|---|---:|---:|
+| Mobile Actions (961) | **86.3** | 63.7 |
+| Mobile Actions, two-plus-call rows | **73.5** | 48.4 |
+| DroidCall (200) | **52.5** | 17.0 |
+| Seal-Tools in-domain (700) | **33.1** | 32.6 |
+| Well-formed JSON | **100.0** | 93.4 |
+
+**Catalog never seen:**
+
+| suite | Thimble v6 | Needle 2 (45M) |
+|---|---:|---:|
+| Seal-Tools out-of-domain (654) | 28.1 | 28.7 |
+| BFCL v4 single-turn (3,641) | 23.5 | 42.6 |
+
+The spread is visible *inside a single suite*: Seal-Tools in-domain 33.1 against
+out-of-domain 28.1, same model, same metric, only the catalogs changed.
+Name-sequence accuracy tracks it exactly, 88% against 79%.
+
+**Disclosures.** Mobile Actions' public train split (8,693 rows, disjoint from
+eval) is in the training mix — that is what the first table's heading means. The
+Seal-in margin over the yardstick is +0.5 on 700 rows, within sampling noise. The
+pre-registered selector picked a sibling checkpoint that scored worse; the
+failure is diagnosed with both models' tables published in
+[FINDINGS.md](https://github.com/nikshepsvn/thimble/blob/master/FINDINGS.md).
+
+## Adapting it to your catalog
 
 ```bash
 git clone https://github.com/nikshepsvn/thimble && cd thimble
@@ -93,7 +166,7 @@ uv venv && uv pip install -e .
 python scripts/eval_catalog.py --ckpt thimble-v6 \
     --catalog my_tools.json --gold my_eval.jsonl
 
-# adapt: synthesize against your schemas, anneal into the decay phase
+# synthesize against your schemas, anneal into the decay phase
 python scripts/adapt.py --catalog my_tools.json --name mydomain
 
 # did it help?
@@ -101,63 +174,14 @@ python scripts/eval_catalog.py --ckpt mydomain --baseline thimble-v6 \
     --catalog my_tools.json --gold my_eval.jsonl
 ```
 
-Two things about that recipe are load-bearing, and both were measured rather
-than assumed. **Anneal, don't retrain** — the same corrective corpus scored 28.4
-fed from scratch and 33.1 annealed into the LR-decay phase. **Keep the guard
-data** — annealing purely on your catalog trades away the general competence you
-are building on.
+Two things about that recipe are load-bearing, both measured rather than assumed.
+**Anneal, don't retrain** — the same corrective corpus scored 28.4 fed from
+scratch and 33.1 annealed into the LR-decay phase. **Keep the guard data** —
+annealing purely on your catalog trades away the competence you are building on.
 
 `adapt.py` wires together exactly the machinery that produced the v6 result, but
 no third-party catalog has been adapted and published yet. The recipe is
 measured; the ergonomics are new.
-
-## When to use this
-
-Reach for it when you have a **fixed catalog you control**, English queries,
-argument values that appear in the query, and a reason to care about 48M
-parameters — a memory ceiling, a latency floor, or wanting a separate model per
-customer rather than one prompted model for all of them.
-
-Do not reach for it for open-world catalogs, Java or JavaScript schema dialects,
-or parallel calls. And if you can afford 600M parameters, fine-tune Qwen
-instead — it will probably score higher. This is for when you cannot.
-
-## What it does
-
-Ordered strict exact match: a row passes only if the function names, the call
-order, and *every* argument value match. The right-hand column is a yardstick,
-not a rival: Needle 2 (Cactus Compute, 45M params, 153B training tokens), their
-published numbers on their metric. It is there so the left column has a scale.
-
-**Known catalog** — represented in training, eval rows firewalled out:
-
-| suite | Thimble v6 | Needle 2 (45M) |
-|---|---:|---:|
-| Mobile Actions (961) | **86.3** | 63.7 |
-| DroidCall (200) | **52.5** | 17.0 |
-| Seal-Tools in-domain (700) | **33.1** | 32.6 |
-| Mobile Actions, two-plus-call rows | **73.5** | 48.4 |
-| Well-formed JSON | **100.0** | 93.4 |
-
-**Unknown catalog** — schemas the model has never seen:
-
-| suite | Thimble v6 | Needle 2 (45M) |
-|---|---:|---:|
-| Seal-Tools out-of-domain (654) | 28.1 | 28.7 |
-| BFCL v4 single-turn (3,641) | 23.5 | 42.6 |
-
-Those two tables are why the adaptation loop exists. Familiar catalog, it works;
-unfamiliar catalog, it degrades — measurably, *inside a single suite*: 33.1
-in-domain versus 28.1 out, same model, same metric, only the catalogs changed.
-Name-sequence accuracy tracks it exactly, 88% in-domain against 79% out. Getting
-your catalog into the first column is the whole job.
-
-**Before quoting the table.** Mobile Actions' public train split (8,693 rows,
-disjoint from eval) is in the training mix — that is what "known catalog" means.
-The Seal-in margin over the yardstick is +0.5 on 700 rows, within sampling
-noise. The pre-registered selector picked a sibling checkpoint that scored
-worse; the failure is diagnosed and both models' results are published in
-[FINDINGS.md](https://github.com/nikshepsvn/thimble/blob/master/FINDINGS.md).
 
 ## How it was built
 

@@ -82,13 +82,13 @@ demo = gr.Interface(
                 value=DEFAULT_CATALOG, language="json"),
     ],
     outputs=gr.Code(label="Tool calls", language="json"),
-    title="🧵 Thimble — 48M-param tool calling, live on CPU",
+    title="🧵 Thimble — a tool-calling layer, 48M params, live on CPU",
     description=(
-        "Calling tools against a known catalog is a structured extraction problem, not a "
-        "generation problem — and it fits in 48M parameters. The JSON structure and every "
-        "argument key are **grammar-guaranteed**; the model only chooses tools, values, and "
-        "when to stop, so malformed JSON and invented parameter names are unreachable. "
-        "86.3% strict exact match on app intents. Runs here on a free CPU.\n\n"
+        "A tool-calling layer, not a language model — it does not converse or write prose, "
+        "it turns a request into calls against the schemas you give it. Structure and every "
+        "argument key are **grammar-guaranteed**: malformed JSON, invented parameter names, "
+        "and calls to undeclared tools are unreachable on any catalog, with no training. "
+        "Edit the catalog below to try your own tools. Runs here on a free CPU.\n\n"
         "[Model](https://huggingface.co/flashvenom/thimble) · "
         "[Code + full experimental record](https://github.com/nikshepsvn/thimble)"
     ),

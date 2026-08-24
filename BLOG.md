@@ -1,22 +1,25 @@
 # Tool calling is five decisions, not a generation problem
 
-*Building a 48M-parameter tool-caller for $260, and measuring the exact point
-where small stops working.*
+*Building a 48M-parameter tool-calling layer for $260, and measuring the exact
+point where small stops working.*
 
-Most tool-calling models are language models that write JSON. This one is a
-language model that makes five decisions, with the JSON assembled around it by a
-compiler. That change is most of the result.
+Most tool-calling models are language models that write JSON. This one is not a
+language model at all. It does not converse, reason, or write prose — it reads a
+catalog of typed functions and a request and returns the calls to make, with the
+JSON assembled around it by a compiler. Treating it as a **layer** rather than a
+model is most of the result.
 
-The claim I'd defend: **calling tools against a catalog you control is a
-structured extraction problem, not a reasoning problem, and it fits in 48M
-parameters.** On a real app-intent catalog it reaches 86.3% ordered strict exact
-match — every function name, the call order, and every argument value correct —
-and it cannot emit malformed JSON or invent a parameter name.
+The claim I would defend: turning a request into calls against an API you control
+is a translation problem, not a reasoning one, and it fits in 48M parameters. On
+a real app-intent catalog it reaches 86.3% ordered strict exact match — every
+function name, the call order, and every argument value correct — including 73.5%
+on rows that need two or more calls. And on *any* catalog, with no training at
+all, it cannot emit malformed JSON, invent a parameter name, or call a tool you
+did not declare.
 
-The claim I wouldn't: that this generalizes. Off a familiar catalog it degrades
-sharply, and the last section is about exactly how sharply and why. That
-boundary is the most useful thing here, so it gets a section rather than a
-footnote.
+The claim I would not: that this is general. Off a familiar catalog it degrades,
+and the last sections are about exactly how and why. That boundary is the most
+useful thing here, so it gets a section rather than a footnote.
 
 ## Five decisions
 
