@@ -6,9 +6,13 @@ pipeline_tag: text-generation
 tags:
 - function-calling
 - tool-calling
-- on-device
-- small-model
+- constrained-decoding
 - grammar-constrained-decoding
+- structured-generation
+- json
+- small-model
+- slm
+- on-device
 - edge
 library_name: pytorch
 model-index:
