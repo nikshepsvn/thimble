@@ -163,8 +163,11 @@ failure is diagnosed with both models' tables published in
 
 ```bash
 git clone https://github.com/nikshepsvn/thimble && cd thimble
-uv venv && uv pip install -e .
-# put thimble-v6.pt in checkpoints/, tokenizer.json in data/
+uv venv && uv pip install -e ".[hub]"
+
+# both files come from this repo; neither is in git
+hf download flashvenom/thimble thimble-v6.pt --local-dir checkpoints/
+hf download flashvenom/thimble tokenizer.json --local-dir data/
 
 # where do you stand on your own tools?
 python scripts/eval_catalog.py --ckpt thimble-v6 \
@@ -215,7 +218,34 @@ not for tokens it will never emit.
 
 **The decoder consults the model only at those points.** Everything else is
 determined before it runs, which is where the contract above comes
-from.
+from. One call, start to finish — `MODEL` marks the only places the network is
+asked anything:
+
+```
+  [                                    <- grammar
+  └─ ? refuse or call ...................... MODEL
+       │
+       ├─ refuse ──────────────► ]      <- grammar
+       │
+       └─ call
+          {"name":"                     <- grammar
+          └─ ? which tool .................. MODEL
+             ","arguments":{            <- grammar
+             │
+             ├─ next key from YOUR schema  <- grammar
+             │  ├─ ? include it ........... MODEL
+             │  └─ ? what value ........... MODEL
+             │     (repeat for each key)
+             │
+             }}                         <- grammar
+             └─ ? stop or continue ........ MODEL
+                ├─ continue ──► back to {"name":"
+                └─ stop ──────► ]        <- grammar
+```
+
+Every `<- grammar` line is emitted without consulting the model at all. Argument
+keys are iterated from your schema, which is why inventing one is not a
+low-probability event — there is no step at which it could happen.
 
 ### Evidence the co-design works
 
@@ -341,8 +371,11 @@ The guarantees live in the decoding harness, so inference goes through the repo:
 
 ```bash
 git clone https://github.com/nikshepsvn/thimble
-cd thimble && uv venv && uv pip install -e .
-# put thimble-v6.pt in checkpoints/, tokenizer.json in data/
+cd thimble && uv venv && uv pip install -e ".[hub]"
+
+# both files come from this repo; neither is in git
+hf download flashvenom/thimble thimble-v6.pt --local-dir checkpoints/
+hf download flashvenom/thimble tokenizer.json --local-dir data/
 
 python demo.py "make a reservation at Nobu for 2 people at 7pm and text Sam saying dinner is on"
 # [{"name": "createReservation",

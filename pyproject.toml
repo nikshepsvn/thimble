@@ -1,18 +1,20 @@
 [project]
 name = "tiny-toolcall"
 version = "0.1.0"
-description = "45M factorized on-device tool caller"
+description = "A tool-calling layer: your schemas in, validated calls out, at 48M parameters"
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=2.0",
   "httpx>=0.27",
   "orjson>=3.10",
   "pyyaml>=6.0",
+  "torch>=2.5",
 ]
 
 [project.optional-dependencies]
-train = ["torch>=2.5"]
+hub = ["huggingface_hub>=0.26"]   # only needed to fetch the weights
 dev = ["pytest>=8.0"]
+train = []                        # torch is a core dep now; kept so [train] still resolves
 
 [project.scripts]
 ttc = "tiny_toolcall.cli:main"
