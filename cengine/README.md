@@ -1,5 +1,9 @@
 # cengine — Thimble in one C file
 
+**Live in your browser:** [nikshepsvn.com/thimble](https://nikshepsvn.com/thimble/)
+— this engine compiled to WebAssembly (`make wasm`, sources in `web/`), running
+the full int8 model client-side at ~250–650ms per call.
+
 A dependency-free C port of the whole inference stack: tokenizer, trunk,
 KV-cached decoder with snapshot/rollback, name head, lexical retrieval, and the
 grammar walk. No PyTorch, no Python, no runtime downloads. The weights file is

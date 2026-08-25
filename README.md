@@ -48,6 +48,13 @@ quotes, commas, every argument key — is determined before it runs.
 Accuracy is a separate question, answered below with numbers. The contract is not
 conditional on any of them.
 
+## Try it in your browser
+
+**[nikshepsvn.com/thimble](https://nikshepsvn.com/thimble/)** — the C engine
+compiled to WebAssembly. The whole model runs in the tab (105KB engine + 48MB
+int8 weights, no server); edit the tool catalog live and watch the grammar
+adapt with zero retraining. ~250–650ms per call via SIMD128.
+
 ## Try it in 30 seconds
 
 ```
