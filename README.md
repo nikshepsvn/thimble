@@ -232,7 +232,10 @@ so the tokenizer's own share of the gain was never isolated.
 **The loss is weighted by those same five decisions** — structure 1x, keys 1.5x,
 names 2x, values 4x, stop-decision 6x — matched to the measured error
 distribution. The model is optimized for the choices it will be asked to make,
-not for tokens it will never emit.
+not for tokens it will never emit. (A closely related weighting, without the
+stop-decision term, appears independently in Needle's
+[Simple Attention Networks notes](https://github.com/cactus-compute/needle/blob/main/docs/simple_attention_networks.md);
+the scheme is not original to this project.)
 
 **The decoder consults the model only at those points.** Everything else is
 determined before it runs, which is where [the contract](#the-contract) comes
@@ -384,6 +387,8 @@ corpus spent deliberately on depth rather than breadth.
 - **[REPRODUCING.md](REPRODUCING.md)** — repository layout and the exact
   pipeline that rebuilds the published numbers.
 - **[RESULTS.md](RESULTS.md)** — the full chronological experimental record.
+- **[paper/thimble.pdf](paper/thimble.pdf)** — the tech report: the co-design
+  thesis, the negative results, and the related work, in citable form.
 
 ## Honest summary
 

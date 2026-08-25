@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use Thimble, please cite it as below."
+title: "Thimble: a 48M-parameter tool-calling model"
+authors:
+  - family-names: Saravanan
+    given-names: Nikshep
+repository-code: "https://github.com/nikshepsvn/thimble"
+url: "https://huggingface.co/flashvenom/thimble"
+license: MIT
+preferred-citation:
+  type: report
+  title: "Thimble: A 48M-Parameter Tool-Calling Model from Co-Designing the Tokenizer, Loss, and Decoder — with Eleven Negative Results"
+  authors:
+    - family-names: Saravanan
+      given-names: Nikshep
+  year: 2026
+  url: "https://github.com/nikshepsvn/thimble/blob/master/paper/thimble.pdf"
