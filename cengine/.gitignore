@@ -6,3 +6,4 @@ _bench_*
 _parity_*
 web/thimble.js
 web/thimble.wasm
+_gate_*
