@@ -344,10 +344,12 @@ and the takeaway. It is the most reusable part of the project.
   and `simple_javascript` 8.0. Those conventions are absent from a deliberately
   extractive ~1B-token corpus.
 - **768-token context.** 151 of 3,641 BFCL rows (4.1%) do not fit and score as misses.
-- **Deployment.** 48.12M parameters is ~11.5MB at 2-bit and ~92MB at bf16, but
-  what ships is the 184MB fp32 checkpoint and **there is no on-device inference
-  engine**. The size figure is a property of the parameter count, not a runnable
-  microcontroller artifact. Today this is a small, fast server-side layer.
+- **Deployment.** 48.12M parameters is ~11.5MB at 2-bit, but 2-bit would need
+  quantization-aware retraining this model never had. What actually runs today:
+  [cengine/](cengine/) is a dependency-free single-file C port of the full
+  decoder — 48MB int8 weights, ~20ms load, byte-identical output to the Python
+  stack on 100/100 checked eval rows, faster than the torch stack on an M3.
+  That makes laptops, phones and edge Linux reachable; microcontrollers are not.
 
 Scale explains most of it honestly: ~1B unique tokens, no pretraining phase, a
 corpus spent deliberately on depth rather than breadth.
