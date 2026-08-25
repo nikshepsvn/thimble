@@ -16,9 +16,9 @@ clean:
 
 .PHONY: clean
 
-wasm: thimble.c
+wasm: thimble.c  # requires emscripten; EXPORT_ES6 for browser module import
 	emcc thimble.c -O3 -msimd128 -o web/thimble.js \
-	  -sMODULARIZE=1 -sEXPORT_NAME=createThimble \
+	  -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=createThimble \
 	  -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=268435456 \
 	  -sSTACK_SIZE=4194304 \
 	  -sEXPORTED_FUNCTIONS='["_th_init","_th_call","_malloc","_free"]' \
