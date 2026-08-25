@@ -1071,6 +1071,19 @@ static void lexical_scores_c(const char *query, const Tool *tools, const int *to
 
 /* --------------------------------------------------------- decoder core */
 
+/* Dispatch-confidence signals, reset per decode_calls:
+ *  - g_last_margin: minimum, across emitted calls, of the name-choice
+ *    probability margin (top1 - top2 of the ensembled candidate
+ *    distribution); 1.0 for single-candidate choices and refusals.
+ *  - g_val_lp_sum / g_val_lp_n: mean log-probability of the argument-value
+ *    decisions the model made freely (string/number tokens, enum picks,
+ *    optional-include choices) — the argument-side complement.
+ * Measured quantities, not calibrated probabilities; the gate threshold
+ * comes from the coverage/precision sweep in route/. */
+static double g_last_margin = 1.0;
+static double g_val_lp_sum = 0.0;
+static long g_val_lp_n = 0;
+
 #define MAX_CALLS 4
 #define LEX_MAX_WEIGHT 0.85
 #define LEX_SHARPNESS 4.0
@@ -1329,6 +1342,9 @@ static int dec_choose_str(Dec *d, const char **opts, int n) {
     dec_score_str(d, opts, n, sc);
     int best = 0;
     for (int i = 1; i < n; i++) if (sc[i] > sc[best]) best = i;
+    /* used only for argument-side choices (optional include, enum values) */
+    g_val_lp_sum += sc[best];
+    g_val_lp_n++;
     return best;
 }
 
@@ -1360,6 +1376,8 @@ static char *dec_gen_string(Dec *d) {
             if (d->logits[i] > best) { best = d->logits[i]; nxt = i; }
         }
         if (nxt == close_id) break;
+        g_val_lp_sum += (double)d->logits[nxt] - logsumexp(d->logits, d->m->vocab);
+        g_val_lp_n++;
         int looped = 0;
         ids_out[n_out] = nxt;
         int cn = n_out + 1;
@@ -1462,6 +1480,8 @@ static char *dec_gen_number(Dec *d) {
         if (comma_id >= 0 && d->logits[comma_id] > best_struct) best_struct = d->logits[comma_id];
         if (brace_id >= 0 && d->logits[brace_id] > best_struct) best_struct = d->logits[brace_id];
         if (out.len > 0 && best_struct > d->logits[nxt]) break;
+        g_val_lp_sum += (double)d->logits[nxt] - logsumexp(d->logits, d->m->vocab);
+        g_val_lp_n++;
         sb_put(&out, tok_str(d->t, nxt));
         dec_feed_id(d, nxt);
     }
@@ -1689,6 +1709,9 @@ static Call fill_args(Dec *d, const Tool *tool) {
 /* constrained_decode (gated, name head on, k=0 default, temp=0) */
 static int decode_calls(Model *m, Tok *t, const char *query,
                         const Tool *tools, int n_tools, Call *out_calls) {
+    g_last_margin = 1.0;
+    g_val_lp_sum = 0.0;
+    g_val_lp_n = 0;
     if (!n_tools) return 0;
     int k = n_tools <= 8 ? n_tools : 8;
     char *prompt = render_prompt(query, tools, n_tools);
@@ -1813,6 +1836,13 @@ static int decode_calls(Model *m, Tok *t, const char *query,
         }
         int pick = 0;
         for (int i = 1; i < n_cand; i++) if (probs[i] > probs[pick]) pick = i;
+        if (n_cand > 1) {
+            double p2 = -1.0;
+            for (int i = 0; i < n_cand; i++)
+                if (i != pick && probs[i] > p2) p2 = probs[i];
+            double margin = probs[pick] - p2;
+            if (margin < g_last_margin) g_last_margin = margin;
+        }
         const Tool *tool = &tools[cand_idx[pick]];
         dec_feed_str(d, tool->name);
         dec_feed_str(d, "\",\"arguments\":{");
@@ -1860,8 +1890,9 @@ const char *th_call(const char *catalog_json, const char *query) {
     char *body = calls_to_json(calls, n);
     SB out;
     sb_init(&out);
-    char head[64];
-    snprintf(head, sizeof head, "{\"ms\":%.0f,\"calls\":", dt);
+    char head[96];
+    double vlp = g_val_lp_n ? g_val_lp_sum / g_val_lp_n : 0.0;
+    snprintf(head, sizeof head, "{\"ms\":%.0f,\"margin\":%.4f,\"vlp\":%.4f,\"calls\":", dt, g_last_margin, vlp);
     sb_put(&out, head);
     sb_put(&out, body);
     sb_put(&out, "}");
@@ -1889,19 +1920,23 @@ static char *read_file(const char *path) {
 int main(int argc, char **argv) {
     const char *wpath = NULL, *tpath = NULL, *cpath = NULL, *jsonl = NULL;
     const char *query = NULL;
-    int stats = 0;
+    int stats = 0, serve = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) wpath = argv[++i];
         else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) tpath = argv[++i];
         else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) cpath = argv[++i];
         else if (strcmp(argv[i], "--jsonl") == 0 && i + 1 < argc) jsonl = argv[++i];
+        else if (strcmp(argv[i], "--serve") == 0) serve = 1;
         else if (strcmp(argv[i], "--stats") == 0) stats = 1;
         else query = argv[i];
     }
-    if (!wpath || !tpath || (!jsonl && (!cpath || !query))) {
+    if (!wpath || !tpath || (!serve && !jsonl && (!cpath || !query))) {
         fprintf(stderr,
             "usage: thimble -w weights.bin -t tokenizer.bin -c catalog.json \"query\"\n"
-            "       thimble -w weights.bin -t tokenizer.bin --jsonl rows.jsonl\n");
+            "       thimble -w weights.bin -t tokenizer.bin --jsonl rows.jsonl\n"
+            "       thimble -w weights.bin -t tokenizer.bin --serve\n"
+            "  --serve: JSONL loop on stdin/stdout; one {\"query\":...,\"tools\":[...]}\n"
+            "  request per line, one {\"ms\":...,\"margin\":...,\"calls\":[...]} reply per line.\n");
         return 2;
     }
     double t0 = now_ms();
@@ -1911,6 +1946,31 @@ int main(int argc, char **argv) {
 
     double t1 = now_ms();
     int n_rows = 0;
+    if (serve) {
+        /* long-running dispatcher: one JSON request per stdin line */
+        char *line = NULL;
+        size_t cap = 0;
+        ssize_t len;
+        while ((len = getline(&line, &cap, stdin)) > 0) {
+            if (len <= 1) continue;
+            JVal *row = jparse(line);
+            const char *q = jstr(jget(row, "query"), "");
+            int n_tools = 0;
+            Tool *tools = tools_from_json(jget(row, "tools"), &n_tools);
+            Call calls[MAX_CALLS];
+            double q0 = now_ms();
+            int n = decode_calls(m, t, q, tools, n_tools, calls);
+            double qdt = now_ms() - q0;
+            char *body = calls_to_json(calls, n);
+            double vlp = g_val_lp_n ? g_val_lp_sum / g_val_lp_n : 0.0;
+            printf("{\"ms\":%.0f,\"margin\":%.4f,\"vlp\":%.4f,\"calls\":%s}\n", qdt, g_last_margin, vlp, body);
+            fflush(stdout);
+            free(body);
+            n_rows++;
+        }
+        free(line);
+        return 0;
+    }
     if (jsonl) {
         char *all = read_file(jsonl);
         char *line = strtok(all, "\n");
