@@ -218,6 +218,37 @@ Parity is verified, not assumed: fp32 output is byte-identical to the Python
 stack on 100/100 checked rows, and int8 differs on 2/100 — both of which
 happened to move toward gold. Laptops, phones and edge Linux are in reach.
 
+## Using it as an agent fast path
+
+Semantic routers answer *which tool*; the request still pays an LLM call for
+the arguments. **[route/](route/)** is the other half: a ~130ms local
+dispatcher that returns the complete validated call plus two confidence
+signals, so your big model is only consulted when the dispatcher abstains.
+
+```python
+from route.dispatch import ThimbleDispatcher
+
+d = ThimbleDispatcher()   # wraps `cengine/thimble --serve`
+r = d.dispatch("text Sam that i'm running late", tools)
+r.dispatched   # True — confidence cleared the per-catalog gate
+r.calls        # [{"name":"sendMessage","arguments":{"body":"i'm running late","contact":"Sam"}}]
+```
+
+The gate is measured, not assumed. On a catalog represented in training
+(Mobile Actions, n=300 gold rows), sweeping the value-confidence threshold:
+
+| gate | requests dispatched | precision of dispatched |
+|---|---:|---:|
+| vlp ≥ −0.002 | 77% | 98.7% |
+| vlp ≥ −0.001 | 65% | 99.5% |
+
+On a catalog the model handles poorly, the same gate collapses coverage to
+~17% instead of dispatching confidently wrong calls. Derive the threshold for
+*your* catalog from a small gold set (`route.dispatch.sweep`, one command);
+if no threshold clears your bar, adapt the model first or keep everything on
+the fallback path. A LangGraph node example with full router traceability is
+in [route/langgraph_fastpath.py](route/langgraph_fastpath.py).
+
 ## How it works
 
 Most constrained-decoding systems bolt a grammar onto a model trained to generate
@@ -403,5 +434,8 @@ Turning a request into calls against an API you control is a smaller problem tha
 the models usually pointed at it. Treated as a translation layer rather than a
 language model, it fits in 48M parameters, comes with guarantees a prompted model
 cannot offer, and can be specialized to one catalog for the price of a dinner.
-Its limits are real and measured rather than described. Built by one person over
-a few days with AI assistance, for about the price of a video game console.
+It ships as a working system, not just a checkpoint: a one-file C engine with
+byte-verified parity, a browser demo running the whole model client-side, and a
+measured confidence gate for fronting a larger agent. Its limits are real and
+measured rather than described. Built by one person over a few days with AI
+assistance, for about the price of a video game console.
