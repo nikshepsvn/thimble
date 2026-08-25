@@ -200,6 +200,11 @@ static void mw_row(const MW *w, int row, float *dst) {
 #define HAVE_SDOT 1
 #endif
 
+#if defined(__wasm_simd128__)
+#include <wasm_simd128.h>
+#define HAVE_WASM_SIMD 1
+#endif
+
 /* y = W x (single row of activations).
  *
  * Quantized fast path: quantize x once to int8 (absmax), then each output row
@@ -238,6 +243,26 @@ static void mw_matvec(const MW *w, const float *x, float *y) {
         for (; i < in; i++) s += row[i] * xq[i];
         y[o] = w->sc[o] * sx * (float)s;
     }
+#elif defined(HAVE_WASM_SIMD)
+    for (int o = 0; o < w->out; o++) {
+        const int8_t *row = w->q + (size_t)o * in;
+        v128_t acc = wasm_i32x4_splat(0);
+        int i = 0;
+        for (; i + 16 <= in; i += 16) {
+            v128_t a = wasm_v128_load(row + i);
+            v128_t b = wasm_v128_load(xq + i);
+            /* i8 x i8 -> i16 pairs -> pairwise i32 accumulate; products are
+             * bounded by 127*127 so the i16 lanes cannot overflow */
+            v128_t lo = wasm_i16x8_extmul_low_i8x16(a, b);
+            v128_t hi = wasm_i16x8_extmul_high_i8x16(a, b);
+            acc = wasm_i32x4_add(acc, wasm_i32x4_extadd_pairwise_i16x8(lo));
+            acc = wasm_i32x4_add(acc, wasm_i32x4_extadd_pairwise_i16x8(hi));
+        }
+        int32_t s = wasm_i32x4_extract_lane(acc, 0) + wasm_i32x4_extract_lane(acc, 1)
+                  + wasm_i32x4_extract_lane(acc, 2) + wasm_i32x4_extract_lane(acc, 3);
+        for (; i < in; i++) s += row[i] * xq[i];
+        y[o] = w->sc[o] * sx * (float)s;
+    }
 #else
     for (int o = 0; o < w->out; o++) {
         const int8_t *row = w->q + (size_t)o * in;
@@ -257,6 +282,13 @@ static void mw_matmul(Model *m, const MW *w, const float *x, float *y, int n) {
     }
     const float *wf = w->f;
     if (!wf) {
+#ifndef __APPLE__
+        /* no BLAS to feed: the vectorized int8 matvec per row beats
+         * dequant + scalar fp32 loops on both memory traffic and compute */
+        for (int r = 0; r < n; r++)
+            mw_matvec(w, x + (size_t)r * w->in, y + (size_t)r * w->out);
+        return;
+#else
         for (int o = 0; o < w->out; o++) {
             const int8_t *row = w->q + (size_t)o * w->in;
             float *dst = m->deq + (size_t)o * w->in;
@@ -264,6 +296,7 @@ static void mw_matmul(Model *m, const MW *w, const float *x, float *y, int n) {
             for (int i = 0; i < w->in; i++) dst[i] = row[i] * s;
         }
         wf = m->deq;
+#endif
     }
     matmul_nt(wf, x, y, n, w->out, w->in);
 }
@@ -1060,6 +1093,14 @@ typedef struct {
     float *rcos, *rsin;
 } Dec;
 
+static void dec_free(Dec *d) {
+    free(d->kc); free(d->vc); free(d->hidden); free(d->ids); free(d->logits);
+    free(d->x); free(d->xn); free(d->q); free(d->k); free(d->v); free(d->y);
+    free(d->g); free(d->h1); free(d->h3); free(d->ff); free(d->att);
+    free(d->rcos); free(d->rsin);
+    free(d);
+}
+
 static Dec *dec_new(Model *m, Tok *t) {
     Dec *d = xcalloc(1, sizeof(Dec));
     d->m = m;
@@ -1781,9 +1822,54 @@ static int decode_calls(Model *m, Tok *t, const char *query,
     if (!stopped_via_bracket) dec_feed_str(d, "]");   /* for-else in Python */
     free(spans);
     free(prompt);
-    /* dec buffers leak per query by design simplicity; fine for a CLI */
+    dec_free(d);
     return n_emitted;
 }
+
+/* --------------------------------------------------------- wasm API */
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+
+static Model *g_model = NULL;
+static Tok *g_tok = NULL;
+
+EMSCRIPTEN_KEEPALIVE
+int th_init(const char *wpath, const char *tpath) {
+    g_model = model_load(wpath);
+    g_tok = tok_load(tpath);
+    return (g_model && g_tok) ? 0 : 1;
+}
+
+/* One request: catalog JSON + query in, dumps_calls JSON out.
+ * Returned string is owned by the engine and valid until the next call.
+ * The page pre-validates the catalog JSON, so die() paths are unreachable
+ * from well-formed UI input. */
+EMSCRIPTEN_KEEPALIVE
+const char *th_call(const char *catalog_json, const char *query) {
+    static char *last = NULL;
+    free(last);
+    last = NULL;
+    if (!g_model || !g_tok) return "{\"error\":\"engine not initialized\"}";
+    int n_tools = 0;
+    Tool *tools = tools_from_json(jparse(catalog_json), &n_tools);
+    Call calls[MAX_CALLS];
+    double t0 = now_ms();
+    int n = decode_calls(g_model, g_tok, query, tools, n_tools, calls);
+    double dt = now_ms() - t0;
+    char *body = calls_to_json(calls, n);
+    SB out;
+    sb_init(&out);
+    char head[64];
+    snprintf(head, sizeof head, "{\"ms\":%.0f,\"calls\":", dt);
+    sb_put(&out, head);
+    sb_put(&out, body);
+    sb_put(&out, "}");
+    free(body);
+    last = out.buf;
+    return last;
+}
+#endif
 
 /* ------------------------------------------------------------- main */
 

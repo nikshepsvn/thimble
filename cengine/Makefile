@@ -15,3 +15,14 @@ clean:
 	rm -f thimble
 
 .PHONY: clean
+
+wasm: thimble.c
+	emcc thimble.c -O3 -msimd128 -o web/thimble.js \
+	  -sMODULARIZE=1 -sEXPORT_NAME=createThimble \
+	  -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=268435456 \
+	  -sSTACK_SIZE=4194304 \
+	  -sEXPORTED_FUNCTIONS='["_th_init","_th_call","_malloc","_free"]' \
+	  -sEXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS"]' \
+	  --no-entry
+
+.PHONY: wasm

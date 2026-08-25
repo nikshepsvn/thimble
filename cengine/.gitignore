@@ -4,3 +4,5 @@ thimble-q8.bin
 tokenizer.bin
 _bench_*
 _parity_*
+web/thimble.js
+web/thimble.wasm

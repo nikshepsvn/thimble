@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thimble — tool calling in your browser</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3;
+    --dim: #8b949e; --accent: #ffcc4d; --green: #2ea043; --red: #c8324c;
+    --blue: #58a6ff; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 880px; margin: 0 auto; padding: 32px 20px 80px;
+  }
+  h1 { font-size: 28px; letter-spacing: -0.5px; }
+  h1 .thread { margin-right: 8px; }
+  .sub { color: var(--dim); margin: 6px 0 4px; }
+  .sub b { color: var(--text); font-weight: 600; }
+  .links { margin: 10px 0 26px; font-size: 14px; }
+  .links a { color: var(--blue); text-decoration: none; margin-right: 16px; }
+  .links a:hover { text-decoration: underline; }
+
+  #loader { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+            padding: 22px; margin-bottom: 24px; }
+  #bar-wrap { background: var(--bg); border-radius: 6px; height: 10px; overflow: hidden;
+              margin-top: 12px; border: 1px solid var(--border); }
+  #bar { background: var(--accent); height: 100%; width: 0%; transition: width .15s; }
+  #load-msg { color: var(--dim); font-size: 14px; }
+  #load-msg b { color: var(--text); }
+
+  .grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+  @media (min-width: 760px) { .grid { grid-template-columns: 1fr 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px;
+             color: var(--dim); margin-bottom: 10px; font-weight: 600; }
+  textarea, input[type=text] {
+    width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; font-family: var(--mono); font-size: 12.5px;
+  }
+  textarea { min-height: 300px; resize: vertical; line-height: 1.5; }
+  textarea:focus, input:focus { outline: 1px solid var(--blue); }
+  #catalog-err { color: var(--red); font-size: 13px; min-height: 18px; margin-top: 6px; }
+
+  #query { font-size: 15px; padding: 12px 14px; margin-bottom: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .chip { background: var(--bg); border: 1px solid var(--border); color: var(--dim);
+          border-radius: 999px; padding: 4px 12px; font-size: 12.5px; cursor: pointer; }
+  .chip:hover { color: var(--text); border-color: var(--dim); }
+  #run { background: var(--accent); color: #1c1c1c; border: none; border-radius: 8px;
+         padding: 11px 22px; font-size: 15px; font-weight: 700; cursor: pointer; width: 100%; }
+  #run:disabled { opacity: .45; cursor: default; }
+  #run:hover:not(:disabled) { filter: brightness(1.08); }
+
+  #out { margin-top: 14px; }
+  #latency { font-family: var(--mono); font-size: 12px; color: var(--green);
+             margin-bottom: 8px; min-height: 16px; }
+  pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+        padding: 14px; font-family: var(--mono); font-size: 13px; overflow-x: auto;
+        white-space: pre-wrap; word-break: break-word; min-height: 90px; }
+  .k { color: var(--blue); } .s { color: var(--accent); } .n { color: #79c0ff; }
+  .refused { color: var(--dim); font-style: italic; }
+  .foot { margin-top: 34px; color: var(--dim); font-size: 13.5px; border-top: 1px solid var(--border); padding-top: 18px; }
+  .foot a { color: var(--blue); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<h1><span class="thread">🧵</span>Thimble</h1>
+<p class="sub">A 48M-parameter tool-calling model, running <b>entirely in this browser tab</b>.
+No server, no telemetry — a 105KB WebAssembly engine plus 48MB of int8 weights, downloaded once.</p>
+<p class="sub">Structure is guaranteed by a grammar compiled from the catalog below: the output is
+always valid JSON, argument keys can only come from the schemas, and undeclared tools cannot be
+called. <b>Edit the catalog</b> — the grammar adapts instantly, no retraining.</p>
+<div class="links">
+  <a href="https://github.com/nikshepsvn/thimble">github</a>
+  <a href="https://huggingface.co/flashvenom/thimble">weights</a>
+  <a href="https://github.com/nikshepsvn/thimble/blob/master/FINDINGS.md">11 negative results</a>
+  <a href="https://github.com/nikshepsvn/thimble/blob/master/paper/thimble.pdf">tech report</a>
+</div>
+
+<div id="loader">
+  <div id="load-msg">loading engine…</div>
+  <div id="bar-wrap"><div id="bar"></div></div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>your request</h2>
+    <input id="query" type="text" placeholder="make a reservation at Nobu for 2 at 7pm…" disabled>
+    <div class="chips" id="chips"></div>
+    <button id="run" disabled>run the model</button>
+    <div id="out">
+      <div id="latency"></div>
+      <pre id="result">…</pre>
+    </div>
+  </div>
+  <div class="card">
+    <h2>tool catalog (editable json)</h2>
+    <textarea id="catalog" spellcheck="false"></textarea>
+    <div id="catalog-err"></div>
+  </div>
+</div>
+
+<p class="foot">
+The model is consulted at exactly five choice points — refuse or call, which tool, include this
+optional, what value, stop or continue. Everything else is emitted by the grammar. Built by
+<a href="https://github.com/nikshepsvn">Nikshep Saravanan</a>; engine is
+<a href="https://github.com/nikshepsvn/thimble/blob/master/cengine/thimble.c">one C file</a>, MIT.
+Native speed is ~130–350ms per call on an M3; wasm runs the same int8 kernels via SIMD128.
+</p>
+
+<script type="module">
+import createThimble from './thimble.js';
+
+const DEMO_CATALOG = [
+  {"name": "createReservation", "description": "Book a table at a restaurant",
+   "parameters": {"type": "object", "properties": {
+     "partySize": {"type": "integer", "description": "number of people"},
+     "time": {"type": "string", "description": "reservation time"},
+     "restaurant": {"type": "string", "description": "restaurant name"}},
+     "required": ["partySize", "time"]}},
+  {"name": "sendMessage", "description": "Send a text message to a contact",
+   "parameters": {"type": "object", "properties": {
+     "contact": {"type": "string", "description": "who to message"},
+     "body": {"type": "string", "description": "message content"}},
+     "required": ["contact", "body"]}},
+  {"name": "setAlarm", "description": "Set an alarm",
+   "parameters": {"type": "object", "properties": {
+     "time": {"type": "string", "description": "alarm time"},
+     "label": {"type": "string", "description": "alarm label"}},
+     "required": ["time"]}},
+  {"name": "getWeather", "description": "Get the weather forecast for a city",
+   "parameters": {"type": "object", "properties": {
+     "city": {"type": "string", "description": "city name"},
+     "date": {"type": "string", "description": "date, YYYY-MM-DD"}},
+     "required": ["city"]}}
+];
+
+const EXAMPLES = [
+  "make a reservation at Nobu for 2 people at 7pm and text Sam saying dinner is on",
+  "whats the weather in berlin tomorrow",
+  "set an alarm for 6:30am called gym",
+  "sing me a happy birthday song",
+];
+
+const $ = id => document.getElementById(id);
+$('catalog').value = JSON.stringify(DEMO_CATALOG, null, 2);
+for (const ex of EXAMPLES) {
+  const c = document.createElement('span');
+  c.className = 'chip';
+  c.textContent = ex.length > 46 ? ex.slice(0, 44) + '…' : ex;
+  c.title = ex;
+  c.onclick = () => { $('query').value = ex; run(); };
+  $('chips').appendChild(c);
+}
+
+async function fetchWithProgress(url, label, weight, base) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`fetch ${url}: ${res.status}`);
+  const total = +res.headers.get('Content-Length') || 0;
+  const reader = res.body.getReader();
+  const chunks = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    got += value.length;
+    if (total) {
+      const pct = base + weight * (got / total);
+      $('bar').style.width = (pct * 100).toFixed(1) + '%';
+      $('load-msg').innerHTML = `downloading <b>${label}</b> — ${(got / 1e6).toFixed(1)} / ${(total / 1e6).toFixed(1)} MB`;
+    }
+  }
+  const buf = new Uint8Array(got);
+  let o = 0;
+  for (const c of chunks) { buf.set(c, o); o += c.length; }
+  return buf;
+}
+
+let M = null;
+async function boot() {
+  try {
+    M = await createThimble();
+    const weights = await fetchWithProgress('thimble-q8.bin', 'weights (48MB, cached after first visit)', 0.97, 0);
+    const tok = await fetchWithProgress('tokenizer.bin', 'tokenizer', 0.03, 0.97);
+    M.FS.writeFile('/w.bin', weights);
+    M.FS.writeFile('/t.bin', tok);
+    const t0 = performance.now();
+    const rc = M.ccall('th_init', 'number', ['string', 'string'], ['/w.bin', '/t.bin']);
+    if (rc !== 0) throw new Error('engine init failed');
+    $('bar').style.width = '100%';
+    $('load-msg').innerHTML = `<b>ready</b> — model loaded in ${(performance.now() - t0).toFixed(0)}ms. everything below runs locally.`;
+    $('query').disabled = false;
+    $('run').disabled = false;
+    $('query').focus();
+  } catch (e) {
+    $('load-msg').innerHTML = `<span style="color:var(--red)">failed to load: ${e.message}</span>`;
+  }
+}
+
+function validCatalog(text) {
+  let j;
+  try { j = JSON.parse(text); } catch (e) { return 'catalog is not valid JSON: ' + e.message; }
+  if (!Array.isArray(j)) return 'catalog must be a JSON array of tools';
+  for (const t of j) {
+    if (typeof t !== 'object' || t === null || Array.isArray(t)) return 'each tool must be an object';
+    if (typeof t.name !== 'string' || !t.name) return 'each tool needs a string "name"';
+  }
+  return null;
+}
+
+function pretty(calls) {
+  if (!calls.length) return '<span class="refused">[]   (refused — no tool applies)</span>';
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  return calls.map(c => {
+    const args = Object.entries(c.arguments).map(([k, v]) => {
+      const vs = typeof v === 'string' ? `<span class="s">"${esc(v)}"</span>` : `<span class="n">${v}</span>`;
+      return `    <span class="k">"${esc(k)}"</span>: ${vs}`;
+    }).join(',\n');
+    return `{\n  <span class="k">"name"</span>: <span class="s">"${esc(c.name)}"</span>,\n  <span class="k">"arguments"</span>: {\n${args}\n  }\n}`;
+  }).join(',\n');
+}
+
+function run() {
+  if (!M || $('run').disabled) return;
+  const err = validCatalog($('catalog').value);
+  $('catalog-err').textContent = err || '';
+  if (err) return;
+  const q = $('query').value.trim();
+  if (!q) return;
+  $('run').disabled = true;
+  $('latency').textContent = 'thinking…';
+  setTimeout(() => {
+    try {
+      const raw = M.ccall('th_call', 'string', ['string', 'string'],
+                          [JSON.stringify(JSON.parse($('catalog').value)), q]);
+      const r = JSON.parse(raw);
+      $('latency').textContent = `${r.ms}ms · ${r.calls.length} call${r.calls.length === 1 ? '' : 's'} · grammar-validated`;
+      $('result').innerHTML = pretty(r.calls);
+    } catch (e) {
+      $('latency').textContent = '';
+      $('result').textContent = 'error: ' + e.message;
+    }
+    $('run').disabled = false;
+  }, 30);
+}
+
+$('run').onclick = run;
+$('query').addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+boot();
+</script>
+</body>
+</html>
