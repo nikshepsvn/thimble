@@ -186,6 +186,31 @@ machinery that produced the v6 result, but no third-party catalog has been
 adapted and published. The recipe is measured; the ergonomics are new. If you run
 it, the numbers are worth a pull request.
 
+## Deploying it
+
+The Python stack is for training, eval and adaptation. To serve or embed the
+model there is **[cengine/](cengine/)** — the full decoder (tokenizer, trunk,
+grammar walk, name head, retrieval) in one dependency-free C file:
+
+```
+uv run python cengine/export.py && cd cengine && make
+./thimble -w thimble-q8.bin -t tokenizer.bin -c demo_catalog.json \
+    "make a reservation at Nobu for 2 people at 7pm"
+```
+
+| | weights | load | per request* |
+|---|---:|---:|---:|
+| Python stack (torch, CPU) | 184 MB | seconds | 582 ms |
+| cengine fp32 | 191 MB | ~60 ms | 453 ms |
+| cengine int8 | 48 MB | ~20 ms | 348 ms |
+
+*mean over the first 100 Mobile Actions eval rows on an Apple M3; a request is
+a full decode, prefill plus every choice point and rollback.
+
+Parity is verified, not assumed: fp32 output is byte-identical to the Python
+stack on 100/100 checked rows, and int8 differs on 2/100 — both of which
+happened to move toward gold. Laptops, phones and edge Linux are in reach.
+
 ## How it works
 
 Most constrained-decoding systems bolt a grammar onto a model trained to generate
@@ -344,12 +369,10 @@ and the takeaway. It is the most reusable part of the project.
   and `simple_javascript` 8.0. Those conventions are absent from a deliberately
   extractive ~1B-token corpus.
 - **768-token context.** 151 of 3,641 BFCL rows (4.1%) do not fit and score as misses.
-- **Deployment.** 48.12M parameters is ~11.5MB at 2-bit, but 2-bit would need
-  quantization-aware retraining this model never had. What actually runs today:
-  [cengine/](cengine/) is a dependency-free single-file C port of the full
-  decoder — 48MB int8 weights, ~20ms load, byte-identical output to the Python
-  stack on 100/100 checked eval rows, faster than the torch stack on an M3.
-  That makes laptops, phones and edge Linux reachable; microcontrollers are not.
+- **Microcontrollers.** ~11.5MB at 2-bit is a property of the parameter count,
+  not a shippable artifact: 2-bit would need quantization-aware retraining this
+  model never had. The smallest thing that actually runs is the 48MB int8
+  engine ([Deploying it](#deploying-it)) — Pi-class and up, not Cortex-M.
 
 Scale explains most of it honestly: ~1B unique tokens, no pretraining phase, a
 corpus spent deliberately on depth rather than breadth.
