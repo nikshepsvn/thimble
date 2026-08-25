@@ -19,8 +19,7 @@
 Co-Designing the Tokenizer, Loss, and Decoder\\
 \large --- with eleven negative results ---}}
 
-% TODO(author): replace with your name as it should appear on arXiv.
-\author{Nikshep S.\ (\texttt{nikshepsvn})\\
+\author{Nikshep Saravanan\\
 \small\texttt{nikshepsvn@gmail.com}\\
 \small\url{https://github.com/nikshepsvn/thimble}}
 \date{August 2026}
@@ -56,9 +55,9 @@ chronological experimental record are released under MIT.
 
 \section{Introduction}
 
-Most systems that need tool calling obtain it from a general-purpose model:
-either a frontier model prompted with function schemas, or a sub-billion-parameter
-model fine-tuned for the task
+Most systems that need tool calling obtain it from a general-purpose model
+\citep{toolformer,gorilla}: either a frontier model prompted with function
+schemas, or a sub-billion-parameter model fine-tuned for the task
 \citep{tinyagent,octopusv2,xlam}. Both inherit machinery the task does not
 obviously need --- open-vocabulary generation, world knowledge, conversational
 ability --- and both keep a failure mode the task cannot tolerate: nothing
@@ -143,10 +142,12 @@ specialist must learn sequencing structure that a pretrained LLM already has.
 \paragraph{Small tool-calling models.} TinyAgent \citep{tinyagent} fine-tunes
 1.1B/7B models for edge function calling; Octopus~v2 \citep{octopusv2} trains
 a 2B on-device model with functional tokens; xLAM \citep{xlam} releases a
-family of action models down to 1B. In the sub-100M class, \needle{}
-\citep{needle2,san} is the published reference point: a 45M attention-only
-architecture trained on 153B tokens with quantization-aware training and a
-production C++ engine. \thimble{} reaches its parameter class from a different
+family of action models down to 1B. Empirical studies of small models on
+function calling consistently find them capable but brittle off-distribution
+\citep{smallbig}, consistent with our own in-domain/out-of-domain split. In
+the sub-100M class, \needle{} \citep{needle2,san} is the published reference
+point: a 45M attention-only architecture trained on 153B tokens with
+quantization-aware training and a production C++ engine. \thimble{} reaches its parameter class from a different
 direction --- a boring dense trunk, $\sim$1B unique training tokens, no
 pretraining phase, and the co-design thesis above --- which makes the
 comparison informative even where it is not controlled.
@@ -242,16 +243,23 @@ added exactly one unmentioned optional argument, $\sim$35 bound the wrong
 entity, $\sim$30 missed canonical date forms, and $\sim$29 were unwinnable
 gold-typing noise (\S\ref{sec:negative}). Three matching synthesis modes
 (74{,}250 accepted rows, \$56) were annealed into the learning-rate decay
-phase of a continued run rather than retrained from scratch: the same
-corrective corpus scored 28.4 fed from step zero and \textbf{33.1} annealed
-into decay, with a mid-run probe at constant learning rate attributing
-$+3.3$ points to the corpus itself. Corrective data dilutes when it competes
-with the whole corpus and concentrates when it arrives late; timing is a
-hyperparameter of the dataset.
+phase of a continued run (no re-warmup, following \citealp{parmar2024}) rather
+than retrained from scratch: the same corrective corpus scored 28.4 fed from
+step zero and \textbf{33.1} annealed into decay, with a mid-run probe at
+constant learning rate attributing $+3.3$ points to the corpus itself.
+Corrective data dilutes when it competes with the whole corpus and
+concentrates when it arrives late; timing is a hyperparameter of the dataset.
+This replicates, at 48M scale and under a controlled from-scratch twin, the
+decay-phase data curricula of MiniCPM \citep{minicpm} and OLMo~2
+\citep{olmo2}, and the continued-pretraining recipe of \citet{parmar2024},
+which independently locates the distribution switch late in the decay
+schedule; the controlled twin --- same corrective corpus, scratch versus
+anneal --- is the part those reports do not isolate.
 
 \paragraph{Trunk.} The architecture is deliberately standard: $d{=}448$, 20
 layers, GQA 8/4, SwiGLU $2.0\times$, QK-norm, sandwich RMSNorm, tied
-embeddings, 768-token context, Muon on 2D weights with AdamW elsewhere. A
+embeddings, 768-token context, Muon \citep{muon} on 2D weights with AdamW
+elsewhere. A
 controlled study by the \needle{} authors \citep{san} finds architecture
 choices at this scale worth hundredths of a nat at matched parameters; our
 experience matched --- every real gain came from tokenizer, loss, or data
@@ -395,8 +403,9 @@ Gating requires calibration, not accuracy.
 It targeted the key-set error bucket, which training had already fixed by the
 time it ran. Re-diagnose before implementing; fixes have a shelf life.
 \item \textbf{Beam search / RL / best-of-$N$: oracle-capped below target.}
-pass@9 --- perfect selection over nine samples, which no deployable reranker
-achieves --- plateaued at exactly $+5.0$ at every sample size measured,
+pass@$k$ \citep{codex} with $k{=}9$ --- perfect selection over nine samples,
+which no deployable reranker achieves --- plateaued at exactly $+5.0$ at
+every sample size measured,
 reaching 29.3 where 32.6 was needed. For most failing rows the correct call
 array is not in the model's distribution at any temperature; the gap is
 capability, not search.
@@ -409,8 +418,8 @@ catalog wrecks another. Inclusion rate is a property of the catalog, which
 makes it a training problem, not a decoding constant.
 \item \textbf{Raising \texttt{MAX\_CALLS} 4 $\to$ 6: $0.000$ change.} The cap
 was never binding; long rows fail for other reasons.
-\item \textbf{RLOO on the annealed checkpoint: diverges at every learning
-rate tried} (reward $0.50\to-0.12$ by update 200 at $2\mathrm{e}{-5}$;
+\item \textbf{RLOO \citep{rloo} on the annealed checkpoint: diverges at every
+learning rate tried} (reward $0.50\to-0.12$ by update 200 at $2\mathrm{e}{-5}$;
 healthy to update 550 then $0.92\to0.13$ at $5\mathrm{e}{-6}$), while the same
 recipe ran stably on the conventionally-decayed sibling. Decay-phase annealing
 appears to leave the model in a sharper minimum that policy-gradient noise
